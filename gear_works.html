@@ -60,7 +60,112 @@ const FORCE_EVEN_TEETH = true;
 const TEETH_ROUNDING = 1;
 
 const MENU_W = 112, MENU_PAD = 10, BTN_H = 34, BTN_GAP = 6;
-const FONT = "Helvetica, Arial, sans-serif";
+
+// ============================================================
+// DESIGN TOKENS — art direction "Machined Instrument" (see DESIGN.md)
+// Single source of truth for the canvas side. The chrome layer mirrors these
+// as CSS custom properties on :root; keep the two in sync.
+// ============================================================
+const T = {
+  // --- chassis -------------------------------------------------
+  void:      "#06080B",
+  field:     "#0B0E14",
+  fieldHi:   "#141A24",
+  panel:     "#111621",
+  panelHi:   "#1A2130",
+  keycap:    "#1C2432",
+  keycapHi:  "#273142",
+  groove:    "#05070A",
+  edge:      "#2A3446",
+  edgeHi:    "#43526E",
+  // --- ink -----------------------------------------------------
+  ink:       "#EAF0FA",
+  ink2:      "#A2B0C6",
+  ink3:      "#6C7A91",
+  ink4:      "#46536A",
+  // --- signal --------------------------------------------------
+  amber:     "#FFB020",
+  amberHi:   "#FFD98A",
+  amberDim:  "#6E4B10",
+  cyan:      "#5FD9FF",
+  cyanHi:    "#B7EEFF",
+  cyanDim:   "#17546B",
+  green:     "#4BE39B",
+  red:       "#FF6252",
+  // --- alloy (gear bodies; size-coded, do not repurpose) --------
+  alloyU1:   "#7C5FB4",
+  alloyU2:   "#2E8B85",
+  alloyU3:   "#B0783F",
+  alloyU4:   "#AC4D63",
+  alloyU5:   "#5062B4",
+  alloySP:   "#3F8A57",
+  alloyRack: "#5B6580",
+  alloyRing: "#2F7F6E",
+  alloyRod:  "#D2A24A",
+  // --- type ----------------------------------------------------
+  fontSans:  "'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif",
+  fontMono:  "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+  fs: { micro: 10, caption: 11, label: 12, bodySm: 13, body: 15, subhead: 18, title: 24, displaySm: 34, display: 48 },
+  trackLabel: 0.10,          // em, uppercase micro/label tracking
+  // --- space / radius / stroke ---------------------------------
+  sp: [0, 4, 8, 12, 16, 24, 32, 48],
+  r:  [0, 3, 6, 10, 14],
+  strokeHair: 1, strokeBase: 2, strokeEmph: 3,
+  touchMin: 44,
+  // --- material derivation (one place, so new parts inherit) ----
+  facetLight: 1.34,          // top-left facet multiplier
+  facetDark:  0.62,          // bottom-right facet multiplier
+  specLift:   0.38,          // specular sweep lightness lift
+  specArc:    12 * Math.PI / 180,
+};
+
+// hex -> {r,g,b} 0..255, memoised (draw path must not allocate per frame)
+const _hexCache = new Map();
+function hexRGB(hex) {
+  let v = _hexCache.get(hex);
+  if (v) return v;
+  const n = parseInt(hex.slice(1), 16);
+  v = { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  _hexCache.set(hex, v);
+  return v;
+}
+const _rgbaCache = new Map();
+// "#RRGGBB" + alpha -> css rgba() string, memoised
+function ca(hex, a) {
+  const key = a === undefined ? hex : hex + "|" + a;
+  let s = _rgbaCache.get(key);
+  if (s) return s;
+  const c = hexRGB(hex);
+  s = a === undefined || a >= 1 ? hex : "rgba(" + c.r + "," + c.g + "," + c.b + "," + a + ")";
+  _rgbaCache.set(key, s);
+  return s;
+}
+// Multiply a hex toward black/white — the machined facet derivation.
+const _shadeCache = new Map();
+function shadeHex(hex, mult) {
+  const key = hex + "*" + mult;
+  let s = _shadeCache.get(key);
+  if (s) return s;
+  const c = hexRGB(hex);
+  const f = (x) => Math.max(0, Math.min(255, Math.round(x * mult))) | 0;
+  s = "#" + ((1 << 24) + (f(c.r) << 16) + (f(c.g) << 8) + f(c.b)).toString(16).slice(1);
+  _shadeCache.set(key, s);
+  return s;
+}
+// Lift a hex toward white by t (0..1) — used for the specular sweep.
+const _liftCache = new Map();
+function liftHex(hex, t) {
+  const key = hex + "+" + t;
+  let s = _liftCache.get(key);
+  if (s) return s;
+  const c = hexRGB(hex);
+  const f = (x) => Math.round(x + (255 - x) * t) | 0;
+  s = "#" + ((1 << 24) + (f(c.r) << 16) + (f(c.g) << 8) + f(c.b)).toString(16).slice(1);
+  _liftCache.set(key, s);
+  return s;
+}
+
+const FONT = T.fontSans;
 const RPM_FONT_SIZE = 12;
 // Torque readout. Sim units are arbitrary but consistent, scaled to a friendly
 // range; shows how torque trades off against speed across a train.
