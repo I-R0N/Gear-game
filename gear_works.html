@@ -1,0 +1,1777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Gear Works</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #14161c; overflow: hidden; }
+  #c { display: block; touch-action: none; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+(function () {
+
+// ============================================================
+// USER TUNABLES  (ported 1:1 from the Pythonista version)
+// ============================================================
+const GRID_SCALE = 1.00;
+const PAD_RADIUS_MULT = 0.55;
+
+const DRIVE_SERVO_GAIN = 14.0;   // motor stiffness toward target speed
+const DEFAULT_DRIVE_RPM = 120.0;
+const SPEED_STEP_RPM = 15.0;
+const OMEGA_DAMP = 0.4;
+const MAX_ABS_OMEGA = 30.0;      // rad/s clamp (~286 rpm)
+const COAST_STOP_EPS = 0.03;     // below this a freewheeling train is snapped to rest
+const INERTIA_K = 2.5;           // dimensionless inertia of a reference gear
+const TORQUE_DISPLAY_SCALE = 8.0;   // sim torque -> friendly display units
+
+const FRICTION_B_PER_GEAR = 0.020;
+const FRICTION_B_SCALE_R = 1.0;
+
+const TOOTH_OUTER_EXTRA_MULT = 0.10;
+const TAP_MOVE_TOL_MULT = 0.25;
+
+const SHOW_GRID_POINTS = true;
+const SHOW_MESH_LINES = true;
+const SHOW_PITCH_CIRCLES = true;
+
+const GRID_POINT_SPACING = 1;
+const GRID_POINT_ALPHA = 0.16;
+const GRID_POINT_R_MULT = 0.06;
+const GRID_POINTS_RING = 28;
+
+const TRI_SNAP_SEARCH_R = 6;
+const UNIT3_RADIUS_MULT = 1.5;
+const HEX_OVERLAP_MIN_CENTER_MULT = 0.55;
+
+const VERTEX_MESH_TOL_MULT = 0.22;
+const VERTEX_QUANT_PX = 2.0;
+const MESH_ENGAGE_PAD_MULT = 0.32;
+
+const CIRC_PITCH_PX_MULT = 0.28;
+const MIN_TEETH = 8;
+const MAX_TEETH = 120;
+const FORCE_EVEN_TEETH = true;
+const TEETH_ROUNDING = 1;
+
+const MENU_W = 112, MENU_PAD = 10, BTN_H = 34, BTN_GAP = 6;
+const FONT = "Helvetica, Arial, sans-serif";
+const RPM_FONT_SIZE = 12;
+// Torque readout. Sim units are arbitrary but consistent, scaled to a friendly
+// range; shows how torque trades off against speed across a train.
+function fmt_torque(t) {
+  const v = Math.abs(t) * TORQUE_DISPLAY_SCALE;
+  if (v < 0.05) return "0 N\u00b7m";
+  if (v < 10) return v.toFixed(1) + " N\u00b7m";
+  return Math.round(v) + " N\u00b7m";
+}
+
+// Gear body colours, coded by size (U1 triangle, U2 small hex, U3 big hex)
+const COLOR_U1 = [0.50, 0.34, 0.62];  // violet
+const COLOR_U2 = [0.20, 0.52, 0.50];  // teal
+const COLOR_U3 = [0.66, 0.44, 0.26];  // bronze
+const COLOR_U4 = [0.64, 0.30, 0.40];  // crimson
+const COLOR_U5 = [0.34, 0.40, 0.68];  // indigo
+const COLOR_SP = [0.24, 0.46, 0.30];  // spring: green
+
+// --- Spring gears ---
+// A spring gear stores energy as it turns from rest: torque = -SPRING_K * wind.
+// Winding it up fights back with increasing torque; released, it unwinds the
+// other way with decreasing torque as the wind returns to zero.
+const SPRING_K = 6.0;                          // torque per radian of wind
+const SPRING_DAMP = 12.0;                      // internal loss, so an unwind settles
+
+// --- Damping profiles (switchable at runtime with the "Damp:" button) ---
+// "Normal" is the default game feel. "Clock" nearly removes all loss so a wound
+// spring rings like a clock/hairspring. "None" is fully lossless: with the
+// symplectic integrator the swing is bounded and persists indefinitely.
+//   viscous  = baseline drag on every train (was OMEGA_DAMP)
+//   friction = per-gear rotational friction (was FRICTION_B_PER_GEAR)
+//   spring   = internal loss inside spring gears (was SPRING_DAMP)
+const DAMP_PRESETS = [
+  { name: "Normal", short: "Norm",  viscous: 0.4,  friction: 0.020,  spring: 12.0, coast: 1.80 },
+  { name: "Clock",  short: "Clock", viscous: 0.01, friction: 0.0005, spring: 0.02, coast: 0.02 },
+  { name: "None",   short: "None",  viscous: 0.0,  friction: 0.0,    spring: 0.0,  coast: 0.0  },
+];
+let DAMP_MODE = 0;
+let DAMPING = DAMP_PRESETS[0];
+const SPRING_MAX_WIND = 6.0 * (Math.PI * 2);   // hard stop ("fully wound"), radians
+const SPRING_TURNS_MIN = 1.2;         // spiral turns drawn at rest
+const SPRING_TURNS_MAX = 4.0;         // spiral turns drawn when fully wound
+
+// --- Racks (linear sliding elements) ---
+// A rack is a toothed bar. Meshed with a pinion of pitch radius r it obeys
+// v = +/- r*omega, so it joins the ratio graph as a node whose "omega" is a LINEAR
+// speed (px/s) and whose inertia is a plain mass. Travel limits act as hard stops.
+const COLOR_RACK = [0.40, 0.42, 0.48];
+// --- Ring (annulus) gear: teeth on BOTH the inner and outer pitch circles ---
+// The inner pitch circle drives planets (internal mesh, same spin direction); the
+// outer pitch circle meshes external gears normally. Its "pitch_r" for external
+// meshing is the OUTER pitch radius; internal meshing uses inner_r().
+const COLOR_RING = [0.30, 0.50, 0.44];
+const RING_INNER_MULT = 4.0;     // inner pitch radius = Rp2 * this  (so sun+2*planet closes)
+const RING_RIM_MULT   = 1.5;     // rim thickness (inner pitch -> outer pitch) = Rp2 * this
+const RACK_MASS = 0.002;         // reflected to the train as mass * k^2  (k in px/rad)
+const RACK_FRIC = 0.00002;       // linear friction, reflected as b * k^2
+const RACK_LEN_MULT = 9.0;       // bar length = step * this
+
+// --- Linkages (crank + rod driving a slider) ---
+// Nonlinear position constraints don't fit the linear ratio solver, so a linkage is
+// solved KINEMATICALLY in closed form each frame: the gear's rotation drives the
+// slider. The linked rack becomes kinematic (it leaves the dynamics graph).
+const LINK_PIN_MULT = 0.62;      // crank pin radius as a fraction of the gear pitch radius
+const COLOR_ROD = [0.85, 0.72, 0.35];
+
+// Hex gear sizes: radius = base step * mult. (U1 = triangle, handled separately.)
+const HEX_MULT  = { U2: 1.0, U3: 1.5, U4: 2.0, U5: 2.5, SP: 1.5 };
+const HEX_COLOR = { U2: COLOR_U2, U3: COLOR_U3, U4: COLOR_U4, U5: COLOR_U5, SP: COLOR_SP };
+
+// ============================================================
+// Game / puzzle content
+// ============================================================
+const GAME_TITLE = "GEAR WORKS";
+const WIN_SPIN_EPS = 1e-2;
+
+// Level schema (free-position / pitch-snap world):
+//   drives/driven: [{ pos:[x,y], ... }]  positions in units of Rp2 (the U2 pitch
+//     radius) from the arena centre. Gaps are chosen so a straight tangent chain of
+//     the inventory exactly bridges drive -> target.
+//   inventory: [type...]  gears dropped into the arena for the player to snap in.
+//   Win = every driven gear turning.
+//   Tangent gaps (centre-to-centre, in Rp2): U2-U2 = 2, U3-U2 = 2.5, U2-U1 = 1.5.
+const LEVELS = [
+  { name: "First Link",
+    hint: "Drag the gear so it meshes the drive and the target.",
+    inventory: ["U2"],
+    drives: [{ pos: [-2, 0], rpm: 120, type: "U2" }],
+    driven: [{ pos: [2, 0], type: "U2" }] },
+  { name: "Straight Run",
+    hint: "Snap the 3 gears into a chain across the gap.",
+    inventory: ["U2", "U2", "U2"],
+    drives: [{ pos: [-4, 0], rpm: 120, type: "U2" }],
+    driven: [{ pos: [4, 0], type: "U2" }] },
+  { name: "Double Duty",
+    hint: "Two drives, two targets. Bridge both — two gears each.",
+    inventory: ["U2", "U2", "U2", "U2"],
+    drives: [{ pos: [-3, 3.2], rpm: 120, type: "U2" }, { pos: [-3, -3.2], rpm: 150, type: "U2" }],
+    driven: [{ pos: [3, 3.2], type: "U2" }, { pos: [3, -3.2], type: "U2" }] },
+  { name: "Big & Small",
+    hint: "A big drive spins a small target faster. Chain across with the two gears.",
+    inventory: ["U2", "U2"],
+    drives: [{ pos: [-3.25, 0], rpm: 90, type: "U3" }],
+    driven: [{ pos: [3.25, 0], type: "U2" }] },
+  { name: "The Full Set",
+    hint: "Spin the little triangle gear using the two gears provided.",
+    inventory: ["U2", "U2"],
+    drives: [{ pos: [-3, 0], rpm: 90, type: "U3" }],
+    driven: [{ pos: [3, 0], type: "U1" }] },
+];
+
+// ============================================================
+// Triangular lattice
+// ============================================================
+const TAU = Math.PI * 2;
+const SQRT3 = Math.sqrt(3.0);
+const C30 = SQRT3 * 0.5;
+const S30 = 0.5;
+const DIRS = [[1,0],[0,1],[-1,1],[-1,0],[0,-1],[1,-1]];
+
+function tri_to_screen(i, j, step, origin) {
+  return [step * (C30 * i) + origin[0], step * (S30 * i + j) + origin[1]];
+}
+function screen_to_tri(x, y, step, origin) {
+  const px = x - origin[0], py = y - origin[1];
+  const i = px / (step * C30);
+  const j = (py / step) - (S30 * i);
+  return [i, j];
+}
+function tri_round(i, j) {
+  let x = i, z = j, y = -x - z;
+  let rx = Math.round(x), ry = Math.round(y), rz = Math.round(z);
+  const dx = Math.abs(rx - x), dy = Math.abs(ry - y), dz = Math.abs(rz - z);
+  if (dx > dy && dx > dz) rx = -ry - rz;
+  else if (dy > dz) ry = -rx - rz;
+  else rz = -rx - ry;
+  return [rx | 0, rz | 0];
+}
+function tri_ring(center, radius) {
+  if (radius === 0) return [center.slice()];
+  let cur = [center[0] - radius, center[1] + radius];
+  const out = [];
+  for (let k = 0; k < 6; k++) {
+    const di = DIRS[k][0], dj = DIRS[k][1];
+    for (let n = 0; n < radius; n++) { out.push([cur[0], cur[1]]); cur = [cur[0] + di, cur[1] + dj]; }
+  }
+  return out;
+}
+function dist2(a, b) { const dx = a[0]-b[0], dy = a[1]-b[1]; return dx*dx + dy*dy; }
+function dist(a, b) { return Math.sqrt(dist2(a, b)); }
+function clampf(x, lo, hi) { return x < lo ? lo : (x > hi ? hi : x); }
+
+// cell / tri keys for Maps
+const hk = (c) => c[0] + "," + c[1];
+const tk = (c) => c[0] + "," + c[1] + "," + (c[2] ? 1 : 0);
+
+function omega_to_rpm(w) { return w * 60.0 / TAU; }
+function rpm_to_omega(r) { return r * TAU / 60.0; }
+
+// ============================================================
+// Graphics wrapper: mirrors Pythonista's scene.* but flips Y
+// (origin bottom-left, y-up) onto Canvas (origin top-left, y-down).
+// Shapes use the current fill/stroke just like the scene module;
+// text is painted in the current fill colour.
+// ============================================================
+const G = {
+  ctx: null, W: 0, H: 0, _fill: null, _stroke: null, _lw: 1,
+  setCanvas(ctx, W, H) { this.ctx = ctx; this.W = W; this.H = H; },
+  fy(y) { return this.H - y; },
+  rgba(r, g, b, a) { return "rgba(" + ((r*255)|0) + "," + ((g*255)|0) + "," + ((b*255)|0) + "," + a + ")"; },
+  fill(r, g, b, a) { this._fill = this.rgba(r, g, b, a); },
+  noFill() { this._fill = null; },
+  stroke(r, g, b, a) { this._stroke = this.rgba(r, g, b, a); },
+  strokeWeight(w) { this._lw = w; },
+  background(r, g, b) { const c = this.ctx; c.fillStyle = this.rgba(r, g, b, 1); c.fillRect(0, 0, this.W, this.H); },
+  line(x1, y1, x2, y2) {
+    const c = this.ctx; c.strokeStyle = this._stroke; c.lineWidth = this._lw;
+    c.beginPath(); c.moveTo(x1, this.fy(y1)); c.lineTo(x2, this.fy(y2)); c.stroke();
+  },
+  rect(x, y, w, h) {
+    const c = this.ctx, ty = this.fy(y + h);
+    if (this._fill) { c.fillStyle = this._fill; c.fillRect(x, ty, w, h); }
+    if (this._stroke) { c.strokeStyle = this._stroke; c.lineWidth = this._lw; c.strokeRect(x, ty, w, h); }
+  },
+  ellipse(x, y, w, h) {
+    const c = this.ctx, cx = x + w/2, cy = y + h/2;
+    c.beginPath(); c.ellipse(cx, this.fy(cy), w/2, h/2, 0, 0, TAU);
+    if (this._fill) { c.fillStyle = this._fill; c.fill(); }
+    if (this._stroke) { c.strokeStyle = this._stroke; c.lineWidth = this._lw; c.stroke(); }
+  },
+  polyFill(pts) {
+    const c = this.ctx; c.beginPath();
+    for (let i = 0; i < pts.length; i++) { const X = pts[i][0], Y = this.fy(pts[i][1]); i ? c.lineTo(X, Y) : c.moveTo(X, Y); }
+    c.closePath();
+    if (this._fill) { c.fillStyle = this._fill; c.fill(); }
+  },
+  // Fill a polygon but leave circular windows (holes) actually see-through, using
+  // the even-odd rule so anything drawn beneath shows through the holes.
+  polyFillWithHoles(pts, holes) {
+    const c = this.ctx; c.beginPath();
+    for (let i = 0; i < pts.length; i++) { const X = pts[i][0], Y = this.fy(pts[i][1]); i ? c.lineTo(X, Y) : c.moveTo(X, Y); }
+    c.closePath();
+    for (const h of holes) { c.moveTo(h[0] + h[2], this.fy(h[1])); c.arc(h[0], this.fy(h[1]), h[2], 0, TAU); }
+    if (this._fill) { c.fillStyle = this._fill; c.fill("evenodd"); }
+  },
+  circleFillWithHoles(cx, cy, r, holes) {
+    const c = this.ctx; c.beginPath(); c.arc(cx, this.fy(cy), r, 0, TAU);
+    for (const h of holes) { c.moveTo(h[0] + h[2], this.fy(h[1])); c.arc(h[0], this.fy(h[1]), h[2], 0, TAU); }
+    if (this._fill) { c.fillStyle = this._fill; c.fill("evenodd"); }
+  },
+  strokeCircle(cx, cy, r, rgba, w) {
+    const c = this.ctx; c.beginPath(); c.arc(cx, this.fy(cy), Math.max(0.1, r), 0, TAU);
+    c.strokeStyle = this.rgba(rgba[0], rgba[1], rgba[2], rgba[3]); c.lineWidth = w; c.stroke();
+  },
+  text(s, x, y, size, align) {
+    if (!this._fill) return;
+    const c = this.ctx; c.fillStyle = this._fill;
+    c.font = size + "px " + FONT; c.textAlign = align || "left"; c.textBaseline = "middle";
+    c.fillText(s, x, this.fy(y));
+  },
+  // Centered text on a translucent dark rounded background, so readouts stay legible
+  // on top of gears. (cx, cy) is the centre in world coords.
+  pill_size(lines, size) {
+    const c = this.ctx; c.font = size + "px " + FONT;
+    let w = 0; for (const ln of lines) w = Math.max(w, c.measureText(ln).width);
+    const lh = size + 3;
+    return { bw: w + 12, bh: lines.length*lh + 6, lh };
+  },
+  label_pill(cx, cy, lines, size) {
+    const c = this.ctx; c.textAlign = "center"; c.textBaseline = "middle";
+    const { bw, bh, lh } = this.pill_size(lines, size);
+    const x = cx - bw/2, yTop = this.fy(cy) - bh/2, r = Math.min(6, bh/2);
+    c.beginPath();
+    c.moveTo(x+r, yTop); c.arcTo(x+bw, yTop, x+bw, yTop+bh, r); c.arcTo(x+bw, yTop+bh, x, yTop+bh, r);
+    c.arcTo(x, yTop+bh, x, yTop, r); c.arcTo(x, yTop, x+bw, yTop, r); c.closePath();
+    c.fillStyle = "rgba(12,13,17,0.82)"; c.fill();
+    c.strokeStyle = "rgba(255,255,255,0.16)"; c.lineWidth = 1; c.stroke();
+    c.font = size + "px " + FONT;
+    for (let i = 0; i < lines.length; i++) {
+      c.fillStyle = i === 0 ? "rgba(255,255,255,0.97)" : "rgba(150,210,255,0.95)";
+      c.fillText(lines[i], cx, yTop + 3 + lh/2 + i*lh);
+    }
+  },
+};
+
+// ============================================================
+// Drawing helpers (ported)
+// ============================================================
+function hex_vertices(cx, cy, r) {
+  const v = [];
+  for (let k = 0; k < 6; k++) { const a = (60*k + 30) * Math.PI/180; v.push([cx + r*Math.cos(a), cy + r*Math.sin(a)]); }
+  return v;
+}
+// The see-through windows in a gear body: a ring of circles around the hub, made
+// as large as possible without touching the teeth (outer limit) or each other
+// (mutual limit). Those two limits balance when ringR*(1 + sin(pi/n)) = r_teeth.
+// Same geometry is used to punch holes in the body and to stroke their outlines.
+function gear_windows(cx, cy, pitch_r, angle, tooth_inner_r) {
+  const n = 6, sinp = Math.sin(Math.PI / n);                 // 0.5 for n = 6
+  const rLim = (tooth_inner_r || pitch_r * 0.85) - pitch_r * 0.045;   // sit just inside the teeth
+  const ringR = rLim / (1 + sinp);
+  const dotR = ringR * sinp * 0.94;                          // small gap between windows
+  const out = [];
+  for (let k = 0; k < n; k++) { const a = angle + (k / n) * TAU; out.push([cx + ringR*Math.cos(a), cy + ringR*Math.sin(a), dotR]); }
+  return out;
+}
+function draw_filled_hex(cx, cy, r, fillRgb, outlineAlpha, outlineW, holes) {
+  const verts = hex_vertices(cx, cy, r);
+  G.fill(fillRgb[0], fillRgb[1], fillRgb[2], 1.0);
+  if (holes && holes.length) G.polyFillWithHoles(verts, holes); else G.polyFill(verts);
+  G.stroke(0, 0, 0, outlineAlpha); G.strokeWeight(outlineW);
+  for (let i = 0; i < 6; i++) { const a = verts[i], b = verts[(i+1)%6]; G.line(a[0], a[1], b[0], b[1]); }
+}
+function triangle_vertices_from_cell(i, j, up) {
+  return up ? [[i, j], [i+1, j], [i, j+1]] : [[i+1, j+1], [i+1, j], [i, j+1]];
+}
+function triangle_centroid_screen(i, j, up, step, origin) {
+  const pts = triangle_vertices_from_cell(i, j, up);
+  let sx = 0, sy = 0;
+  for (const p of pts) { const s = tri_to_screen(p[0], p[1], step, origin); sx += s[0]; sy += s[1]; }
+  return [sx/3, sy/3];
+}
+function draw_filled_triangle(tri, fillRgb, outlineAlpha, outlineW, holes) {
+  G.fill(fillRgb[0], fillRgb[1], fillRgb[2], 1.0);
+  if (holes && holes.length) G.polyFillWithHoles(tri, holes); else G.polyFill(tri);
+  G.stroke(0, 0, 0, outlineAlpha); G.strokeWeight(outlineW);
+  G.line(tri[0][0], tri[0][1], tri[1][0], tri[1][1]);
+  G.line(tri[1][0], tri[1][1], tri[2][0], tri[2][1]);
+  G.line(tri[2][0], tri[2][1], tri[0][0], tri[0][1]);
+}
+function draw_gear(cx, cy, pitch_r, angle, teeth, ring_w, tooth_inner_r, tooth_outer_r, isSpring, wind) {
+  // Gear rim
+  G.strokeCircle(cx, cy, pitch_r, [1,1,1,0.55], ring_w);
+  // Gear teeth (radial lines) — the actual gear look
+  G.stroke(1,1,1,0.85); G.strokeWeight(2);
+  for (let t = 0; t < teeth; t++) {
+    const a = angle + (t / teeth) * TAU;
+    G.line(cx + tooth_inner_r * Math.cos(a), cy + tooth_inner_r * Math.sin(a),
+           cx + tooth_outer_r * Math.cos(a), cy + tooth_outer_r * Math.sin(a));
+  }
+  if (isSpring) {
+    // Spring gears show a coiled spiral that tightens with the stored wind.
+    draw_spring_spiral(cx, cy, pitch_r, angle, wind || 0);
+  } else {
+    // Rotation indicator = the ring of see-through windows (the body is punched out
+    // beneath these, so a stacked gear shows through). Just outline them here.
+    for (const w of gear_windows(cx, cy, pitch_r, angle, tooth_inner_r))
+      G.strokeCircle(w[0], w[1], w[2], [1,1,1,0.85], 1.5);
+  }
+  // Hub
+  G.strokeCircle(cx, cy, pitch_r * 0.18, [1,1,1,0.7], 2);
+}
+// A coiled spiral whose turns tighten as the spring winds. Direction of the coil
+// follows the sign of the wind, so winding and unwinding read as opposite.
+function draw_spring_spiral(cx, cy, pitch_r, angle, wind) {
+  const frac = Math.min(Math.abs(wind) / SPRING_MAX_WIND, 1);
+  const turns = SPRING_TURNS_MIN + frac * (SPRING_TURNS_MAX - SPRING_TURNS_MIN);
+  const dir = wind >= 0 ? 1 : -1;
+  const rMin = pitch_r * 0.20, rMax = pitch_r * 0.62;
+  // Calm green -> hot amber as it approaches fully wound.
+  const col = [0.55 + 0.45*frac, 0.95 - 0.35*frac, 0.55 - 0.35*frac, 0.95];
+  const ctx = G.ctx;
+  ctx.beginPath();
+  const N = 140;
+  for (let k = 0; k <= N; k++) {
+    const f = k / N;
+    const a = angle + dir * f * turns * TAU;
+    const r = rMin + (rMax - rMin) * f;
+    const x = cx + r * Math.cos(a), y = G.fy(cy + r * Math.sin(a));
+    k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.strokeStyle = G.rgba(col[0], col[1], col[2], col[3]);
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Fully-wound marker
+  if (frac >= 0.999) G.strokeCircle(cx, cy, pitch_r * 0.74, [1, 0.35, 0.25, 0.95], 3);
+}
+
+function draw_lock_x(cx, cy, r) {
+  G.stroke(1,0.2,0.2,0.95); G.strokeWeight(5);
+  const d = r*0.55;
+  G.line(cx-d, cy-d, cx+d, cy+d); G.line(cx-d, cy+d, cx+d, cy-d);
+}
+
+// ============================================================
+// Teeth
+// ============================================================
+function snap_multiple(n, m) { return m <= 1 ? n : Math.round(n/m)*m; }
+function compute_teeth_from_pitch_radius(pitch_r, cp) {
+  if (cp <= 1e-6) cp = 1.0;
+  let z = Math.round((TAU*pitch_r)/cp);
+  z = clampf(z, MIN_TEETH, MAX_TEETH);
+  z = snap_multiple(z, TEETH_ROUNDING);
+  if (FORCE_EVEN_TEETH && (z % 2) === 1) z = clampf(z+1, MIN_TEETH, MAX_TEETH);
+  return z | 0;
+}
+
+// ============================================================
+// Tiles
+// ============================================================
+let _UID = 1;
+class TileBase {
+  constructor(pos, is_driver) {
+    this.uid = _UID++;
+    this.pos = pos; this.z = 0;
+    this.is_driver = !!is_driver;
+    this.angle = 0; this.omega = 0; this.torque = 0; this.locked = false;
+    this.drag_offset = [0, 0]; this.teeth = 14;
+    this.drive_speed = rpm_to_omega(DEFAULT_DRIVE_RPM);
+    this.anchored = false; this.role = null;  // "drive" | "driven"
+    this.wind = 0;                            // spring gears: stored wind angle (rad)
+    this.partner = null;                      // other gear on a shared shaft (stack)
+    this.on_shaft_top = false;                // true = the stacked gear (rides on a base)
+  }
+  is_spring() { return this.label === "SP"; }
+  is_rack() { return false; }
+  is_ring() { return false; }
+  is_stacked() { return this.partner !== null; }
+  contains(p) { return dist2(this.pos, p) <= this.hit_radius()**2; }
+  inertia(rp_ref) { const s = rp_ref <= 1e-9 ? 1 : this.pitch_r()/rp_ref; return INERTIA_K*s*s; }
+  friction_b(rp_ref) { const s = rp_ref <= 1e-9 ? 1 : Math.pow(this.pitch_r()/rp_ref, FRICTION_B_SCALE_R); return DAMPING.friction*s; }
+  // Text lines for this gear's floating readout (null = don't show one).
+  readout_lines() {
+    if (this.on_shaft_top === false && this.partner) return null;   // base of a stack: top shows it
+    const rpmV = omega_to_rpm(this.omega);
+    const rpm = (Math.abs(rpmV) < 0.05 ? 0 : rpmV).toFixed(0) + " rpm";
+    return [rpm, fmt_torque(this.torque)];
+  }
+  // Screen-up radius: how far above the centre the gear body reaches.
+  readout_top() {
+    if (this.is_ring && this.is_ring()) return this.outer_pr;
+    if (this.label === "U1") return this.Rp_small * 1.5;
+    return this.R || this.pitch_r();
+  }
+}
+class HexGearTile extends TileBase {
+  constructor(pos, R, is_driver, label) {
+    super(pos, is_driver);
+    this.label = label || "U2";
+    this.set_radius(R);
+  }
+  set_radius(R) {
+    this.R = R; const a = R*C30;
+    this.Rp = 0.5*(R + a);
+    this.tooth_inner_r = a;
+    this.tooth_outer_r = R*(1 + TOOTH_OUTER_EXTRA_MULT);
+  }
+  pitch_r() { return this.Rp; }
+  // Central window when stacked: reveal as much of the partner as we can, but keep
+  // it inside our own window ring so our teeth/rim stay intact.
+  _central_window_r() { return this.partner ? Math.min(this.Rp*0.50, Math.max(this.partner.pitch_r()*1.02, this.Rp*0.30)) : 0; }
+  vertex_points_world() { return hex_vertices(this.pos[0], this.pos[1], this.R); }
+  hit_radius() { return this.R*0.95; }
+  draw() {
+    const x = this.pos[0], y = this.pos[1];
+    const fill = HEX_COLOR[this.label] || COLOR_U2;
+    const holes = this.is_spring() ? null : gear_windows(x, y, this.Rp, this.angle, this.tooth_inner_r);
+    // A stacked gear also gets a big central window so the OTHER gear on the shaft
+    // reads clearly — vital when a large gear rides on a small one.
+    if (holes && this.partner) holes.push([x, y, this._central_window_r()]);
+    draw_filled_hex(x, y, this.R, fill, 0.55, 2, holes);
+    draw_gear(x, y, this.Rp, this.angle, this.teeth, 3, this.tooth_inner_r, this.tooth_outer_r,
+              this.is_spring(), this.wind);
+    if (this.is_driver) {
+      const rr = this.R*0.18;
+      G.fill(1,0.6,0.1,0.95); G.stroke(0,0,0,0.35); G.strokeWeight(1);
+      G.ellipse(x - this.R*0.55 - rr, y + this.R*0.55 - rr, 2*rr, 2*rr);
+    }
+    if (this.locked) draw_lock_x(x, y, this.R);
+    if (this.is_stacked()) {
+      // Small shaft ring that frames the central see-through window (kept small so
+      // it doesn't cover the gear showing through behind it).
+      G.strokeCircle(x, y, this._central_window_r(), [1,1,1,0.7], 1.5);
+      G.fill(0.95, 0.85, 0.35, 0.95); G._stroke = null;
+      G.ellipse(x - this.Rp*0.07, y - this.Rp*0.07, this.Rp*0.14, this.Rp*0.14);
+    }
+    if (this.is_spring()) {
+      const turns = this.wind / TAU;
+      G.fill(0.75, 1.0, 0.78, 0.9);
+      G.text((turns >= 0 ? "+" : "") + turns.toFixed(1) + " turns", x - 30, y - this.R*0.42, 11);
+    }
+  }
+}
+class TriGearTile extends TileBase {
+  constructor(pos, Rp_small) {
+    super(pos, false);
+    this.label = "U1";
+    this.set_pitch(Rp_small);
+  }
+  set_pitch(rp) { this.Rp_small = rp; this.tooth_inner_r = rp*0.82; this.tooth_outer_r = rp*1.12; }
+  pitch_r() { return this.Rp_small; }
+  hit_radius() { return this.Rp_small*1.25; }
+  triangle_vertices_world() {
+    // Equilateral triangle centred on pos, rotating with the gear.
+    const r = this.Rp_small*1.5, x = this.pos[0], y = this.pos[1], a0 = this.angle;
+    const v = [];
+    for (let k = 0; k < 3; k++) { const a = a0 + k*TAU/3 + Math.PI/2; v.push([x + r*Math.cos(a), y + r*Math.sin(a)]); }
+    return v;
+  }
+  vertex_points_world() { return this.triangle_vertices_world(); }
+  draw() {
+    const x = this.pos[0], y = this.pos[1];
+    draw_filled_triangle(this.triangle_vertices_world(), COLOR_U1, 0.55, 2, gear_windows(x, y, this.Rp_small, this.angle, this.tooth_inner_r));
+    draw_gear(x, y, this.Rp_small, this.angle, this.teeth, 3, this.tooth_inner_r, this.tooth_outer_r);
+    if (this.is_driver) {
+      const rr = this.Rp_small*0.28;
+      G.fill(1,0.6,0.1,0.95); G.stroke(0,0,0,0.35); G.strokeWeight(1);
+      G.ellipse(x - rr, y + this.Rp_small*0.9 - rr, 2*rr, 2*rr);
+    }
+    if (this.locked) draw_lock_x(x, y, this.Rp_small*1.1);
+  }
+}
+
+// A sliding rack: a toothed bar that converts rotation to translation.
+//   v = sign(perp) * r_pinion * omega_pinion
+// Its "omega" field holds the LINEAR speed (px/s) so it can ride in the same
+// 1-DOF ratio solver as the gears; `s` is its displacement from `home`.
+class RackTile extends TileBase {
+  constructor(pos, len, dir_ang, module) {
+    super(pos, false);
+    this.label = "RK";
+    this.home = pos.slice();
+    this.dir_ang = dir_ang || 0;
+    this.len = len;
+    this.thick = Math.max(6, module * 3.0);
+    this.module = module;
+    this.s = 0;                                   // displacement along dir
+    this.kinematic = false;                       // true when driven by a linkage
+  }
+  is_rack() { return true; }
+  dir() { return [Math.cos(this.dir_ang), Math.sin(this.dir_ang)]; }
+  nrm() { return [-Math.sin(this.dir_ang), Math.cos(this.dir_ang)]; }
+  // The pitch lines run along the bar's two FACES (not its centreline), so a pinion
+  // of radius r rides with its centre this far off the centreline:
+  engage_gap(r) { return this.thick + r; }
+  pitch_r() { return 0; }                          // not a circular gear
+  inertia() { return RACK_MASS; }                  // plain mass (k is px/rad)
+  friction_b() { return RACK_FRIC * (DAMPING.friction / FRICTION_B_PER_GEAR); }  // follows the damping preset
+  sync_pos() { const u = this.dir(); this.pos = [this.home[0] + u[0]*this.s, this.home[1] + u[1]*this.s]; }
+  // Local coords of a world point: [along, perpendicular]
+  local(p) {
+    const u = this.dir(), n = this.nrm(), dx = p[0]-this.pos[0], dy = p[1]-this.pos[1];
+    return [dx*u[0] + dy*u[1], dx*n[0] + dy*n[1]];
+  }
+  contains(p) { const l = this.local(p); return Math.abs(l[0]) <= this.len*0.5 && Math.abs(l[1]) <= this.thick*2.2; }
+  hit_radius() { return this.len*0.5; }
+  vertex_points_world() { return []; }
+  draw() {
+    const u = this.dir(), n = this.nrm(), h = this.len*0.5, th = this.thick;
+    const A = [this.pos[0]-u[0]*h, this.pos[1]-u[1]*h], B = [this.pos[0]+u[0]*h, this.pos[1]+u[1]*h];
+    // bar body
+    const quad = [[A[0]-n[0]*th, A[1]-n[1]*th], [B[0]-n[0]*th, B[1]-n[1]*th],
+                  [B[0]+n[0]*th, B[1]+n[1]*th], [A[0]+n[0]*th, A[1]+n[1]*th]];
+    G.fill(COLOR_RACK[0], COLOR_RACK[1], COLOR_RACK[2], 1.0); G.polyFill(quad);
+    // Teeth stand on the two faces, at the same module as the gears. Their offsets
+    // are fixed relative to the bar, so they travel at exactly the bar's speed.
+    const cp = this.module * Math.PI;
+    const add = this.module * 1.05, ded = this.module * 1.30;
+    const nT = Math.floor(this.len / cp);
+    G.stroke(1,1,1,0.85); G.strokeWeight(2);
+    for (const face of [1, -1]) {
+      for (let i = 0; i <= nT; i++) {
+        const d = -h + i*cp;
+        if (d < -h || d > h) continue;
+        const bx = this.pos[0] + u[0]*d + n[0]*face*(th - ded), by = this.pos[1] + u[1]*d + n[1]*face*(th - ded);
+        const tx = this.pos[0] + u[0]*d + n[0]*face*(th + add), ty = this.pos[1] + u[1]*d + n[1]*face*(th + add);
+        G.line(bx, by, tx, ty);
+      }
+    }
+    // pitch lines along both faces
+    G.stroke(1,1,1,0.45); G.strokeWeight(1);
+    for (const face of [1, -1])
+      G.line(A[0]+n[0]*face*th, A[1]+n[1]*face*th, B[0]+n[0]*face*th, B[1]+n[1]*face*th);
+    // body outline
+    G.stroke(1,1,1,0.5); G.strokeWeight(2);
+    G.line(quad[0][0],quad[0][1],quad[1][0],quad[1][1]); G.line(quad[2][0],quad[2][1],quad[3][0],quad[3][1]);
+    if (this.locked) draw_lock_x(this.pos[0], this.pos[1], th*2);
+    const txt = this.s.toFixed(0) + " px" + (this.kinematic ? "  (link)" : "");
+    G.fill(1,1,1,0.8); G.text(txt, this.pos[0]-24, this.pos[1]+th*3.0, 11);
+  }
+}
+
+// A ring (annulus) gear: teeth on both the inner and outer pitch circles.
+//  - inner pitch circle: internal mesh with a gear inside it (same spin direction)
+//  - outer pitch circle: normal external mesh
+class RingGearTile extends TileBase {
+  constructor(pos, inner_r, rim, module) {
+    super(pos, false);
+    this.label = "RG";
+    this.inner_pr = inner_r;          // inner pitch radius (drives planets)
+    this.rim = rim;                   // inner pitch -> outer pitch
+    this.outer_pr = inner_r + rim;    // outer pitch radius (external mesh)
+    this.module = module;
+  }
+  is_ring() { return true; }
+  pitch_r() { return this.outer_pr; }          // external meshing uses the outer circle
+  inner_r() { return this.inner_pr; }
+  // A ring is a big hoop, so give it a large rotational inertia.
+  inertia(rp_ref) { const s = rp_ref <= 1e-9 ? 1 : this.outer_pr/rp_ref; return INERTIA_K*s*s*1.6; }
+  friction_b(rp_ref) { const s = rp_ref <= 1e-9 ? 1 : Math.pow(this.outer_pr/rp_ref, FRICTION_B_SCALE_R); return DAMPING.friction*s; }
+  hit_radius() { return this.outer_pr*1.02; }
+  contains(p) { const d = dist(this.pos, p); return d <= this.outer_pr*1.06 && d >= this.inner_pr*0.78; }  // the rim, not the hole
+  vertex_points_world() { return []; }
+  _teeth_on(radius, inward, alpha) {
+    const cx = this.pos[0], cy = this.pos[1], cp = this.module*Math.PI;
+    const n = Math.max(6, Math.round(TAU*radius/cp));
+    const add = this.module*1.05, ded = this.module*1.30;
+    const r0 = radius + (inward ? add : -ded), r1 = radius + (inward ? -ded : add);
+    G.stroke(1,1,1,alpha); G.strokeWeight(2);
+    for (let i = 0; i < n; i++) {
+      const a = this.angle + (i/n)*TAU;
+      G.line(cx + r0*Math.cos(a), cy + r0*Math.sin(a), cx + r1*Math.cos(a), cy + r1*Math.sin(a));
+    }
+  }
+  draw() {
+    const cx = this.pos[0], cy = this.pos[1];
+    // annular body: outer disc with the inner hole punched see-through
+    G.fill(COLOR_RING[0], COLOR_RING[1], COLOR_RING[2], 1.0);
+    G.circleFillWithHoles(cx, cy, this.outer_pr, [[cx, cy, this.inner_pr]]);
+    // rim outlines (both pitch circles) + a couple of spokes for rotation legibility
+    G.strokeCircle(cx, cy, this.outer_pr, [1,1,1,0.5], 2);
+    G.strokeCircle(cx, cy, this.inner_pr, [1,1,1,0.5], 2);
+    this._teeth_on(this.outer_pr, false, 0.85);   // external teeth (point outward)
+    this._teeth_on(this.inner_pr, true, 0.85);    // internal teeth (point inward)
+    // registration marks so you can see it turn
+    G.stroke(1,1,1,0.5); G.strokeWeight(2);
+    for (const m of [0, TAU/3, 2*TAU/3]) {
+      const a = this.angle + m, r0 = this.inner_pr, r1 = this.outer_pr;
+      G.line(cx + r0*Math.cos(a), cy + r0*Math.sin(a), cx + r1*Math.cos(a), cy + r1*Math.sin(a));
+    }
+    if (this.locked) draw_lock_x(cx, cy, this.outer_pr*0.5);
+  }
+}
+
+// ============================================================
+// Menu
+// ============================================================
+class MenuButton {
+  constructor(label, id) { this.label = label; this.id = id; this.x = this.y = this.w = this.h = 0; }
+  set_frame(x, y, w, h) { this.x = x; this.y = y; this.w = w; this.h = h; }
+  hit(px, py) { return px >= this.x && px <= this.x+this.w && py >= this.y && py <= this.y+this.h; }
+  draw() {
+    G.fill(0,0,0,0.25); G.stroke(1,1,1,0.18); G.strokeWeight(2);
+    G.rect(this.x, this.y, this.w, this.h);
+    G.fill(1,1,1,0.9);
+    const fs = Math.max(10, Math.min(16, this.h * 0.45));
+    G.text(this.label, this.x + this.w/2, this.y + this.h/2, fs, "center");
+  }
+}
+class GearMenu {
+  constructor() { this.buttons = []; this.x = this.y = 0; this.w = MENU_W; this.h = 0; }
+  set_buttons(list) { this.buttons = list.map(([l, id]) => new MenuButton(l, id)); }
+  button(id) { return this.buttons.find(b => b.id === id) || null; }
+  layout(W, H) {
+    this.x = MENU_PAD; this.y = MENU_PAD; this.w = MENU_W; this.h = H - 2*MENU_PAD;
+    const n = this.buttons.length || 1;
+    // Shrink rows if the stack would overflow a short screen.
+    const avail = H - 2*MENU_PAD;
+    let bh = BTN_H, gap = BTN_GAP;
+    if (n*(bh+gap) - gap > avail) {
+      const per = avail / n;
+      gap = Math.max(2, Math.min(BTN_GAP, per*0.15));
+      bh = Math.max(18, per - gap);
+    }
+    const top = H - MENU_PAD - bh;
+    this.buttons.forEach((b, i) => b.set_frame(this.x, top - i*(bh + gap), this.w, bh));
+  }
+  contains(px, py) { return px >= this.x && px <= this.x+this.w && py >= this.y && py <= this.y+this.h; }
+  draw() {
+    G.fill(0,0,0,0.10); G.stroke(1,1,1,0.08); G.strokeWeight(2);
+    G.rect(this.x, this.y, this.w, this.h);
+    for (const b of this.buttons) b.draw();
+  }
+  hit_test(px, py) { for (const b of this.buttons) if (b.hit(px, py)) return b.id; return null; }
+}
+
+// ============================================================
+// Game (port of GearMeshScene)
+// ============================================================
+class Game {
+  constructor(W, H) {
+    this.W = W; this.H = H;
+    this.bg = [0.10, 0.11, 0.14];
+    this.origin = [W*0.5, H*0.5];
+    this.tile_list = []; this.links = [];
+    this.dragging = false; this.drag_tile = null;
+    this.touch_start = [0, 0]; this.paused = false; this.selected_driver = null;
+    this.mesh_edges = []; this._graph = new Map(); this._topology_dirty = true;
+    this.zoom = 1; this.camPanX = 0; this.camPanY = 0;   // view camera
+    this._recompute_geometry();
+    this.mode = "menu"; this.level_idx = 0; this.win = false;
+    this.menu = new GearMenu(); this.screen_buttons = [];
+    this.enter_main_menu();
+  }
+
+  set_size(W, H) {
+    const oldStep = this.step, oldOrigin = this.origin;
+    this.W = W; this.H = H; this._reset_camera();
+    this.origin = [W*0.5, H*0.5];
+    this._recompute_geometry();
+    this.menu.layout(W, H);
+    if (this.mode === "menu") this._layout_screen_buttons(this._main_menu_items());
+    else if (this.win) this._layout_screen_buttons(this._win_items());
+    // Rescale gear sizes and positions uniformly so meshing/tangency is preserved.
+    const scale = this.step / oldStep;
+    const remap = (p) => [this.origin[0] + (p[0] - oldOrigin[0]) * scale,
+                          this.origin[1] + (p[1] - oldOrigin[1]) * scale];
+    for (const t of this.tile_list) {
+      if (t.is_rack()) {
+        t.len *= scale; t.s *= scale;
+        t.module = this.circular_pitch_px/Math.PI; t.thick = Math.max(6, t.module*3.0);
+        t.home = remap(t.home); t.sync_pos();
+        continue;
+      }
+      if (t.is_ring()) {
+        t.inner_pr = this.Rp2*RING_INNER_MULT; t.rim = this.Rp2*RING_RIM_MULT;
+        t.outer_pr = t.inner_pr + t.rim; t.module = this.circular_pitch_px/Math.PI;
+        t.pos = remap(t.pos);
+        continue;
+      }
+      if (t instanceof HexGearTile) t.set_radius(this._RH(t.label)); else t.set_pitch(this.Rp_small);
+      t.pos = remap(t.pos);
+    }
+    for (const l of this.links) { l.r_pin *= scale; l.len *= scale; }
+    this._mark_dirty();
+  }
+
+  // ---- mode switching ----
+  _clear_board() {
+    this.tile_list = []; this.links = [];
+    this.dragging = false; this.drag_tile = null; this.selected_driver = null;
+    this.paused = false; this.win = false; this._mark_dirty();
+  }
+  _main_menu_items() {
+    const items = [["Free Play", "free"]];
+    LEVELS.forEach((lv, i) => items.push(["Level " + (i+1) + ":  " + lv.name, "lvl_" + i]));
+    return items;
+  }
+  _win_items() {
+    if (this.level_idx + 1 < LEVELS.length) return [["Next Level", "next"], ["Main Menu", "menu"]];
+    return [["Main Menu", "menu"]];
+  }
+  _layout_screen_buttons(items) {
+    const bw = Math.min(360, this.W - 2*MENU_PAD), bh = 52, gap = 14, n = items.length;
+    const total = n*bh + (n-1)*gap;
+    const x = (this.W - bw)*0.5, y0 = (this.H - total)*0.5;
+    this.screen_buttons = items.map(([label, id], k) => {
+      const b = new MenuButton(label, id);
+      b.set_frame(x, y0 + (n-1-k)*(bh + gap), bw, bh);
+      return b;
+    });
+  }
+  enter_main_menu() { this.mode = "menu"; this._reset_camera(); this._clear_board(); this._layout_screen_buttons(this._main_menu_items()); }
+  start_free_play() {
+    this.mode = "free"; this._reset_camera(); this._clear_board();
+    this.menu.set_buttons([
+      ["Add U1","add_tri"],["Add U2","add_u2"],["Add U3","add_u3"],
+      ["Add U4","add_u4"],["Add U5","add_u5"],["Spring","add_sp"],
+      ["Rack","add_rack"],["Link","add_link"],["Ring","add_ring"],
+      ["Wind Up","wind_up"],["Damp: Normal","damp"],
+      ["Speed -","spd_dn"],["Speed +","spd_up"],["Pause","pause"],["Menu","to_menu"]]);
+    this._sync_damp_label();
+    this.menu.layout(this.W, this.H);
+    this._spawn_initial();
+    this.selected_driver = this.tile_list.find(t => t.is_driver) || null;
+    this._mark_dirty(); this._ensure_rebuilt();
+  }
+  _levelPos(p) {
+    // Level positions are authored in units of Rp2 (U2 pitch radius) from centre.
+    return [this.origin[0] + this.Rp2 * p[0], this.origin[1] + this.Rp2 * p[1]];
+  }
+  _add_anchor(type, pos, isDrive) {
+    const t = this._add_gear(type, this._levelPos(pos), isDrive);
+    t.anchored = true; t.role = isDrive ? "drive" : "driven";
+    return t;
+  }
+  _drop_inventory(inv) {
+    // Scatter the player's gears across the top of the arena, well clear of the
+    // fixed drive/target gears and of each other.
+    const n = inv.length;
+    for (let k = 0; k < n; k++) {
+      const type = inv[k];
+      const t = this._add_gear(type, [0, 0], false);
+      const rp = t.pitch_r();
+      let placed = false;
+      for (let attempt = 0; attempt < 400 && !placed; attempt++) {
+        const fx = this.W * (0.28 + 0.44 * (n > 1 ? k / (n - 1) : 0.5)) + (Math.random() - 0.5) * this.step * attempt * 0.15;
+        const fy = this.H * (0.80 - (attempt % 5) * 0.04);
+        const p = [fx, fy];
+        if (this.is_pos_safe(p[0], p[1]) && !this._overlaps(p, rp + this.step * 0.5, t)) { t.pos = p; placed = true; }
+      }
+      if (!placed) this._place_free(t, [this.W * 0.5, this.H * 0.8]);
+    }
+  }
+  start_level(idx) {
+    this.mode = "puzzle"; this._reset_camera();
+    DAMP_MODE = 0; DAMPING = DAMP_PRESETS[0];   // puzzles always use the tuned feel
+    this.level_idx = Math.max(0, Math.min(idx, LEVELS.length - 1));
+    this._clear_board();
+    const lv = LEVELS[this.level_idx];
+    for (const d of lv.drives) {
+      const t = this._add_anchor(d.type || "U2", d.pos, true);
+      if (t) t.drive_speed = rpm_to_omega(d.rpm);
+    }
+    for (const v of lv.driven) this._add_anchor(v.type || "U2", v.pos, false);
+
+    this._drop_inventory(lv.inventory || []);   // scatter the player's gears
+
+    this.menu.set_buttons([["Restart", "restart"], ["Menu", "to_menu"]]);
+    this.menu.layout(this.W, this.H);
+    this._mark_dirty(); this._ensure_rebuilt();
+  }
+  _placed_count() { let n = 0; for (const t of this.tile_list) if (!t.anchored) n++; return n; }
+  _check_win() {
+    const driven = this.tile_list.filter(t => t.role === "driven");
+    if (driven.length && driven.every(t => Math.abs(t.omega) > WIN_SPIN_EPS)) {
+      this.win = true; this._layout_screen_buttons(this._win_items());
+    }
+  }
+
+  _recompute_geometry() {
+    const legacy_unit = Math.min(this.W, this.H) * 0.085 * GRID_SCALE;
+    this.R2 = legacy_unit * PAD_RADIUS_MULT; this.step = this.R2;
+    const a2 = this.R2 * C30;
+    this.Rp2 = 0.5*(this.R2 + a2);
+    this.Rp_small = 0.5*this.Rp2;
+    this.R3 = this.R2 * UNIT3_RADIUS_MULT;
+    this.R4 = this.R2 * HEX_MULT.U4;
+    this.R5 = this.R2 * HEX_MULT.U5;
+    this.safe_margin = this.R5 * 0.22;
+    this.circular_pitch_px = CIRC_PITCH_PX_MULT * this.step;
+    this.tap_move_tol = this.step * TAP_MOVE_TOL_MULT;
+    this.mesh_tol = this.step * 0.14;    // pitch circles this close to tangent => meshing
+    this.snap_reach = this.step * 0.9;   // how near a gear must drop to snap onto another
+    this.pocket_tol = this.step * 0.30;  // how near a two-gear pocket a drop must be to use it
+  }
+  _RH(label) { return this.R2 * (HEX_MULT[label] || 1.0); }  // hex radius for a size label
+
+  // ---- view camera (zoom + pan) ----
+  _reset_camera() { this.zoom = 1; this.camPanX = 0; this.camPanY = 0; }
+  // Convert a canvas/screen point (CSS px, y-down) to world coords (y-up).
+  screen_to_world(mx, my) {
+    return [(mx - this.camPanX) / this.zoom, this.H - (my - this.camPanY) / this.zoom];
+  }
+  // A UI point (menus/HUD are drawn unzoomed) in the y-up space the menus use.
+  screen_to_ui(mx, my) { return [mx, this.H - my]; }
+  zoom_at(px, py, factor) {
+    const zNew = clampf(this.zoom * factor, 0.4, 4.0);
+    const k = zNew / this.zoom;
+    this.camPanX = px - k * (px - this.camPanX);
+    this.camPanY = py - k * (py - this.camPanY);
+    this.zoom = zNew;
+  }
+  pan_by(dx, dy) { this.camPanX += dx; this.camPanY += dy; }
+  cancel_drag() {
+    if (this.dragging && this.drag_tile) { this._replace_tile(this.drag_tile); this._mark_dirty(); }
+    this.dragging = false; this.drag_tile = null;
+  }
+  _refresh_teeth_all() {
+    // Tooth length is set by the module (tooth size), which is the same for every
+    // meshing gear — so big gears get MORE teeth, not longer ones. addendum ~ 1
+    // module above the pitch circle, dedendum ~ 1.25 below. This keeps teeth
+    // interlocking cleanly at the pitch point regardless of gear size.
+    const module = this.circular_pitch_px / Math.PI;
+    const add = module * 1.05, ded = module * 1.30;
+    for (const t of this.tile_list) {
+      if (t.is_rack()) { t.module = module; continue; }   // rack teeth follow the same module
+      const rp = t.pitch_r();
+      t.teeth = compute_teeth_from_pitch_radius(rp, this.circular_pitch_px);
+      t.tooth_outer_r = rp + add;
+      t.tooth_inner_r = Math.max(rp * 0.45, rp - ded);
+    }
+  }
+  _mark_dirty() { this._topology_dirty = true; }
+  _ensure_rebuilt() {
+    if (!this._topology_dirty) return;
+    this._refresh_teeth_all();
+    this._graph = this._build_ratio_graph();
+    this._topology_dirty = false;
+  }
+
+  // ---- placement (free positions, pitch-diameter snapping) ----
+  // Free mode has no arena limits — gears can be placed anywhere (pan/zoom to reach
+  // them). Puzzle inventory staging still keeps its scattered pieces on-screen.
+  is_pos_safe(x, y) { return this.mode !== "puzzle" || this._in_view(x, y); }
+  _in_view(x, y) { const m = this.safe_margin; return x >= m && x <= this.W - m && y >= m && y <= this.H - m; }
+  // Would a gear of pitch rp at pos overlap any existing gear (beyond tangency)?
+  _overlaps(pos, rp, ignore) {
+    for (const t of this.tile_list) {
+      if (t === ignore || (ignore && t === ignore.partner)) continue;
+      if (t.is_rack() || t.is_ring()) continue; // bars and rings don't block a gear
+      if (t.partner) continue;   // shaft gears sit in their own plane — don't block nesting
+      if (dist(pos, t.pos) < rp + t.pitch_r() - this.mesh_tol*1.5) return true;
+    }
+    return false;
+  }
+  // Where a gear of pitch rp must sit to mesh a ring at `drop` (inner or outer
+  // circle, whichever the drop is nearer). Returns [pos, err] or null.
+  _ring_snap(ring, drop, rp) {
+    let u = [drop[0]-ring.pos[0], drop[1]-ring.pos[1]];
+    let d = Math.hypot(u[0], u[1]); if (d < 1e-6) { u = [1,0]; d = 1; } else { u = [u[0]/d, u[1]/d]; }
+    const innerD = ring.inner_r() - rp, outerD = ring.pitch_r() + rp;
+    const useInner = rp < ring.inner_r() && Math.abs(d - innerD) <= Math.abs(d - outerD);
+    const R = useInner ? innerD : outerD;
+    if (Math.abs(d - R) > this.snap_reach) return null;
+    return [[ring.pos[0] + u[0]*R, ring.pos[1] + u[1]*R], Math.abs(d - R)];
+  }
+  // Where a gear of pitch rp must sit to ride tangent on this rack's pitch line.
+  _rack_snap_pos(rack, drop, rp) {
+    const l = rack.local(drop);
+    if (Math.abs(l[0]) > rack.len*0.5) return null;                 // beyond the bar's ends
+    const need = rack.engage_gap(rp);
+    if (Math.abs(Math.abs(l[1]) - need) > this.snap_reach) return null;
+    const u = rack.dir(), n = rack.nrm(), sgn = l[1] >= 0 ? 1 : -1;
+    return [rack.pos[0] + u[0]*l[0] + n[0]*sgn*need, rack.pos[1] + u[1]*l[0] + n[1]*sgn*need];
+  }
+  // Slide a dropped rack sideways so its face is tangent to a nearby pinion.
+  _snap_rack(rack, drop) {
+    rack.home = drop.slice(); rack.s = 0; rack.sync_pos();
+    const n = rack.nrm(), u = rack.dir();
+    let best = null, bestErr = 1e18;
+    for (const g of this.tile_list) {
+      if (g === rack || g.is_rack()) continue;
+      const along = (g.pos[0]-drop[0])*u[0] + (g.pos[1]-drop[1])*u[1];
+      if (Math.abs(along) > rack.len*0.5) continue;
+      const perp = (g.pos[0]-drop[0])*n[0] + (g.pos[1]-drop[1])*n[1];
+      const err = Math.abs(Math.abs(perp) - rack.engage_gap(g.pitch_r()));
+      if (err < bestErr && err <= this.snap_reach) { bestErr = err; best = { g, perp }; }
+    }
+    if (!best) return;
+    const sgn = best.perp >= 0 ? 1 : -1;
+    const shift = best.perp - sgn * rack.engage_gap(best.g.pitch_r());   // set the gap to r + face
+    rack.home = [drop[0] + n[0]*shift, drop[1] + n[1]*shift];
+    rack.s = 0; rack.sync_pos();
+  }
+  // Intersection points of two circles (c1,r1)&(c2,r2); [] if none.
+  _circ_intersect(c1, r1, c2, r2) {
+    const dx = c2[0]-c1[0], dy = c2[1]-c1[1], d = Math.hypot(dx, dy);
+    if (d < 1e-6 || d > r1 + r2 || d < Math.abs(r1 - r2)) return [];
+    const a = (r1*r1 - r2*r2 + d*d) / (2*d), h2 = r1*r1 - a*a;
+    if (h2 < 0) return [];
+    const h = Math.sqrt(h2), xm = c1[0] + a*dx/d, ym = c1[1] + a*dy/d;
+    const ox = -dy/d*h, oy = dx/d*h;
+    return [[xm+ox, ym+oy], [xm-ox, ym-oy]];
+  }
+  // Snap a gear so its pitch circle sits tangent to nearby gears (meshing), or
+  // concentric (stacking). Returns without snapping if nothing is near.
+  _snap_gear(t, drop) {
+    const rp = t.pitch_r();
+    // A rack's pitch line is a snap target too (tangency to a line instead of a circle).
+    let rackPos = null, rackErr = 1e18;
+    for (const rk of this.tile_list) {
+      if (!rk.is_rack()) continue;
+      const p = this._rack_snap_pos(rk, drop, rp);
+      if (!p) continue;
+      const e = Math.abs(Math.abs(rk.local(drop)[1]) - rk.engage_gap(rp));
+      if (e < rackErr) { rackErr = e; rackPos = p; }
+    }
+    // Candidates within reach, ranked by how close the drop is to being *tangent*
+    // to each — so dropping at the small top gear's radius snaps to it, not the
+    // big base it shares a shaft with.
+    // A ring's inner/outer pitch circle is a snap target too.
+    let ringPos = null, ringErr = 1e18;
+    for (const rg of this.tile_list) {
+      if (!rg.is_ring()) continue;
+      const r = this._ring_snap(rg, drop, rp);
+      if (r && r[1] < ringErr) { ringErr = r[1]; ringPos = r[0]; }
+    }
+    // Candidates within reach, ranked by how close the drop is to being *tangent*
+    // to each — so dropping at the small top gear's radius snaps to it, not the
+    // big base it shares a shaft with.
+    const cand = this.tile_list
+      .filter(o => o !== t && o !== t.partner && !o.is_rack() && !o.is_ring())
+      .map(o => ({ o, d: dist(drop, o.pos), err: Math.abs(dist(drop, o.pos) - (rp + o.pitch_r())) }))
+      .filter(c => c.d <= rp + c.o.pitch_r() + this.snap_reach)
+      .sort((a, b) => a.err - b.err);
+    // if a ring circle is the closest tangent, snap to it
+    const bestErr0 = cand.length ? cand[0].err : 1e18;
+    if (ringPos && ringErr <= Math.min(bestErr0, rackErr) && this.is_pos_safe(ringPos[0], ringPos[1])) {
+      t.pos = ringPos; return;
+    }
+    // if the rack line is the closest thing to tangent, ride it
+    const bestGearErr = cand.length ? cand[0].err : 1e18;
+    if (rackPos && rackErr <= bestGearErr && !this._overlaps(rackPos, rp, t) && this.is_pos_safe(rackPos[0], rackPos[1])) {
+      t.pos = rackPos; return;
+    }
+    // A gear tangent to TWO others has only a couple of discrete solutions (for
+    // equal sizes, the 60-degree pocket). That's useful when you're deliberately
+    // nestling a gear between two, but it shouldn't hijack every drop — so only
+    // take it when the drop really is at that pocket. Otherwise fall through to
+    // single-gear tangency, which honours the drop angle exactly.
+    let pocket = null, pocketD = 1e18;
+    for (let i = 0; i < cand.length && i < 4; i++) {
+      for (let j = i + 1; j < cand.length && j < 5; j++) {
+        const a = cand[i].o, b = cand[j].o;
+        if (a.partner === b) continue;
+        const pts = this._circ_intersect(a.pos, rp + a.pitch_r(), b.pos, rp + b.pitch_r());
+        for (const p of pts) {
+          const d = dist(p, drop);
+          if (d < pocketD && !this._overlaps(p, rp, t) && this.is_pos_safe(p[0], p[1])) { pocketD = d; pocket = p; }
+        }
+      }
+    }
+    if (pocket && pocketD <= this.pocket_tol) { t.pos = pocket; return; }
+    // Tangent to the single nearest, at the EXACT angle the gear was dropped —
+    // gears sit at any angle around a neighbour, not on fixed steps.
+    for (const c of cand) {
+      const a = c.o, R = rp + a.pitch_r();
+      let dir = [drop[0]-a.pos[0], drop[1]-a.pos[1]];
+      let dl = Math.hypot(dir[0], dir[1]); if (dl < 1e-6) { dir = [1, 0]; dl = 1; }
+      const base = Math.atan2(dir[1], dir[0]);
+      // if the drop angle is clear, keep it verbatim; otherwise creep away in fine
+      // steps (~0.6 degrees) until the gear fits
+      for (let s = 0; s <= 300; s++) {
+        for (const sgn of (s === 0 ? [0] : [1, -1])) {
+          const ang = base + sgn * s * 0.0105;
+          const p = [a.pos[0] + R*Math.cos(ang), a.pos[1] + R*Math.sin(ang)];
+          if (!this._overlaps(p, rp, t) && this.is_pos_safe(p[0], p[1])) { t.pos = p; return; }
+        }
+      }
+    }
+    // nothing to mesh: leave it where dropped if that's clear
+    if (this._overlaps(drop, rp, t)) return;   // (keep prior pos if the drop overlaps)
+    t.pos = drop.slice();
+  }
+  _place_free(t, pos) {
+    // Put a gear near pos without overlapping (spiral out if needed).
+    const rp = t.pitch_r();
+    if (!this._overlaps(pos, rp, t) && this.is_pos_safe(pos[0], pos[1])) { t.pos = pos.slice(); return; }
+    for (let r = this.step*0.6; r < this.step*30; r += this.step*0.5)
+      for (let a = 0; a < TAU; a += Math.PI/8) {
+        const p = [pos[0] + r*Math.cos(a), pos[1] + r*Math.sin(a)];
+        if (!this._overlaps(p, rp, t) && this.is_pos_safe(p[0], p[1])) { t.pos = p; return; }
+      }
+    t.pos = pos.slice();
+  }
+
+  // ---- spawning ----
+  _add_hex(pos, R, is_driver, label) {
+    const t = new HexGearTile(pos.slice(), R, is_driver, label);
+    this.tile_list.push(t); return t;
+  }
+  _add_tri(pos) {
+    const t = new TriGearTile(pos.slice(), this.Rp_small);
+    this.tile_list.push(t); return t;
+  }
+  _add_gear(type, pos, is_driver) {
+    return type === "U1" ? this._add_tri(pos) : this._add_hex(pos, this._RH(type), is_driver, type);
+  }
+  _spawn_initial() {
+    const cx = this.origin[0], cy = this.origin[1], s = this.step;
+    const drv = this._add_hex([cx - s*3, cy], this.R2, true, "U2");
+    const a = this._add_hex([cx - s*0.8, cy], this.R2, false, "U2");
+    const b = this._add_hex([cx + s*2.6, cy], this.R3, false, "U3");
+    const c = this._add_tri([cx - s*5, cy]);
+    // snap them into a meshing chain
+    this._snap_gear(a, a.pos); this._snap_gear(b, b.pos); this._snap_gear(c, c.pos);
+    this.tile_list.forEach((t, z) => t.z = z);
+  }
+  _add_rack(pos, dir_ang) {
+    const t = new RackTile(pos.slice(), this.step*RACK_LEN_MULT, dir_ang || 0, this.circular_pitch_px/Math.PI);
+    this.tile_list.push(t); return t;
+  }
+  _add_ring(pos) {
+    const t = new RingGearTile(pos.slice(), this.Rp2*RING_INNER_MULT, this.Rp2*RING_RIM_MULT, this.circular_pitch_px/Math.PI);
+    this.tile_list.push(t); return t;
+  }
+  add_gear_from_menu(id) {
+    const spawn = [this.origin[0] + this.step*2.2, this.origin[1]];
+    const top = () => Math.max(0, ...this.tile_list.map(x => x.z)) + 1;
+    if (id === "add_rack") {
+      const t = this._add_rack(spawn, 0);
+      this._place_free(t, spawn);
+      t.home = t.pos.slice(); t.s = 0; t.sync_pos(); t.z = top();
+      return;
+    }
+    if (id === "add_ring") {
+      const t = this._add_ring(spawn);
+      this._place_free(t, spawn);
+      t.z = -1;   // draw behind so planets inside it stay visible
+      return;
+    }
+    const label = { add_tri: "U1", add_u2: "U2", add_u3: "U3", add_u4: "U4", add_u5: "U5", add_sp: "SP" }[id];
+    if (!label) return;
+    const t = this._add_gear(label, spawn, false);
+    this._place_free(t, spawn);
+    t.z = top();
+  }
+  // ---- linkages ----
+  // Join the nearest gear/rack pair with a crank + rod. The rod length is taken
+  // from the current geometry so the linkage starts consistent, but is never
+  // shorter than the pin's greatest reach off the slider axis — otherwise the
+  // crank-slider would have no solution partway round the turn.
+  _make_link() {
+    this._ensure_rebuilt();
+    // A rack that's already meshed with a pinion is a geared rack, not a slider —
+    // don't hijack it.
+    const geared = new Set();
+    for (const [a, b] of this.mesh_edges) { if (a.is_rack()) geared.add(a); if (b.is_rack()) geared.add(b); }
+    let best = null, bd = 1e18;
+    for (const rk of this.tile_list) {
+      if (!rk.is_rack() || geared.has(rk)) continue;
+      for (const g of this.tile_list) {
+        if (g.is_rack()) continue;
+        if (this.links.some(l => l.gear === g && l.rack === rk)) continue;
+        const d = dist(rk.pos, g.pos);
+        if (d < bd) { bd = d; best = { g, rk }; }
+      }
+    }
+    if (!best) return null;
+    const { g, rk } = best;
+    rk.home = rk.pos.slice(); rk.s = 0; rk.sync_pos();
+    const r_pin = Math.max(4, g.pitch_r() * LINK_PIN_MULT);
+    const P = [g.pos[0] + r_pin*Math.cos(g.angle), g.pos[1] + r_pin*Math.sin(g.angle)];
+    const n = rk.nrm();
+    const off = Math.abs((g.pos[0]-rk.home[0])*n[0] + (g.pos[1]-rk.home[1])*n[1]);
+    const len = Math.max(dist(P, rk.pos), off + r_pin + this.step*0.15);
+    const lk = { gear: g, rack: rk, r_pin, len, phase: 0 };
+    this.links.push(lk);
+    rk.kinematic = true; rk.omega = 0;
+    this._mark_dirty();
+    return lk;
+  }
+  _sync_link_flags() {
+    for (const t of this.tile_list) if (t.is_rack()) t.kinematic = this.links.some(l => l.rack === t);
+  }
+  _replace_tile(t) {
+    if (t.is_rack()) { this._snap_rack(t, t.pos); return; }
+    if (t.is_ring()) { return; }   // a ring is the anchor; it just stays where dropped
+    this._snap_gear(t, t.pos);
+    if (t.partner && !t.on_shaft_top) { t.partner.pos = t.pos.slice(); t.partner.z = t.z + 1; }
+  }
+  // ---- stacking (concentric gears on a common shaft) ----
+  _stack_target(t, world) {
+    if (t.is_rack() || t.is_ring()) return null;
+    let best = null, bestd = 1e18;
+    for (const o of this.tile_list) {
+      if (o === t || o.partner || o.on_shaft_top || o.is_rack() || o.is_ring()) continue;
+      const d = dist2(world, o.pos);
+      if (d < bestd && d <= (o.pitch_r() * 0.6) ** 2) { bestd = d; best = o; }
+    }
+    return best;
+  }
+  _stack_on(top, base) {
+    top.partner = base; base.partner = top;
+    top.on_shaft_top = true; base.on_shaft_top = false;
+    top.pos = base.pos.slice();
+    top.z = Math.max(...this.tile_list.map(x => x.z)) + 1;   // draw on top
+  }
+  _unstack(top) {
+    const base = top.partner;
+    if (base) base.partner = null;
+    top.partner = null; top.on_shaft_top = false;
+  }
+  _delete_tile(t) {
+    if (t.partner) this._unstack(t.on_shaft_top ? t : t.partner);
+    this.links = this.links.filter(l => l.gear !== t && l.rack !== t);
+    const i = this.tile_list.indexOf(t); if (i >= 0) this.tile_list.splice(i, 1);
+    if (t === this.selected_driver) this.selected_driver = null;
+    this._sync_link_flags();
+  }
+  _cycle_driver(t) {
+    // Racks aren't motors — tapping one turns it, so you can lay it against a
+    // pinion at any angle.
+    if (t.is_rack()) { t.dir_ang = (t.dir_ang + Math.PI/4) % TAU; t.sync_pos(); this._mark_dirty(); return; }
+    if (!t.is_driver) { t.is_driver = true; this.selected_driver = t; }
+    else if (t !== this.selected_driver) { this.selected_driver = t; }
+    else { t.is_driver = false; this.selected_driver = this.tile_list.find(x => x.is_driver) || null; }
+  }
+  _adjust_selected_speed(d_rpm) {
+    if (!this.selected_driver) this.selected_driver = this.tile_list.find(x => x.is_driver) || null;
+    const d = this.selected_driver; if (!d) return;
+    const rpm = omega_to_rpm(d.drive_speed) + d_rpm, mx = omega_to_rpm(MAX_ABS_OMEGA);
+    d.drive_speed = rpm_to_omega(clampf(rpm, -mx, mx));
+  }
+  _reset() {
+    this.tile_list = []; this.links = [];
+    this.dragging = false; this.drag_tile = null; this.paused = false; this.selected_driver = null;
+    this._sync_pause_label(); this._spawn_initial();
+    this.selected_driver = this.tile_list.find(t => t.is_driver) || null; this._mark_dirty();
+  }
+
+  // ---- meshing graph ----
+  _active_tiles() {
+    // Every gear participates except the one being dragged (and, if a base with a
+    // stack is dragged, its partner too, since the pair leaves the board together).
+    if (!this.drag_tile) return this.tile_list;
+    const skip = new Set([this.drag_tile]);
+    if (this.drag_tile.partner && !this.drag_tile.on_shaft_top) skip.add(this.drag_tile.partner);
+    return this.tile_list.filter(t => !skip.has(t));
+  }
+  // Is a gear meshed with a rack? Returns the signed perpendicular offset (which
+  // fixes the direction of travel) or null. Tangency to the rack's pitch LINE is
+  // the rack version of pitch-circle tangency.
+  _rack_engage(rack, gear) {
+    if (rack.kinematic) return null;              // linkage-driven racks aren't geared
+    const l = rack.local(gear.pos);               // [along, perpendicular]
+    if (Math.abs(l[0]) > rack.len*0.5) return null;   // pinion is off the end of the bar
+    if (Math.abs(Math.abs(l[1]) - rack.engage_gap(gear.pitch_r())) > this.mesh_tol) return null;
+    return l[1];
+  }
+  // How a plain gear meshes a ring, if at all. Returns "internal" (gear rides the
+  // inner teeth, same spin) or "external" (gear on the outer teeth, opposite spin).
+  _ring_engage(ring, gear) {
+    const d = dist(ring.pos, gear.pos), r = gear.pitch_r();
+    if (Math.abs(d - (ring.inner_r() - r)) <= this.mesh_tol && r < ring.inner_r()) return "internal";
+    if (Math.abs(d - (ring.pitch_r() + r)) <= this.mesh_tol) return "external";
+    return null;
+  }
+  _build_mesh_edges() {
+    // Two gears mesh when their pitch circles are (near) tangent: |d - (r1+r2)| ~ 0.
+    // A gear meshes a rack when its pitch circle is tangent to the rack's pitch line.
+    // A ring gear meshes on its inner circle (internal) or outer circle (external).
+    // Concentric shaft partners are excluded.
+    const occ = this._active_tiles();
+    const out = [];
+    for (let i = 0; i < occ.length; i++) {
+      const a = occ[i];
+      for (let j = i + 1; j < occ.length; j++) {
+        const b = occ[j];
+        if (a.partner === b) continue;
+        if (a.is_rack() && b.is_rack()) continue;
+        if (a.is_ring() && b.is_ring()) continue;      // two rings don't mesh here
+        if (a.is_rack() || b.is_rack()) {
+          // rack <-> pinion, or rack <-> ring outer teeth (ring acts as a big
+          // external gear of radius outer_pr, which is what pitch_r() returns).
+          const rack = a.is_rack() ? a : b, gear = a.is_rack() ? b : a;
+          if (this._rack_engage(rack, gear) !== null) out.push([a, b]);
+          continue;
+        }
+        if (a.is_ring() || b.is_ring()) {
+          const ring = a.is_ring() ? a : b, gear = a.is_ring() ? b : a;
+          if (this._ring_engage(ring, gear) !== null) out.push([a, b]);
+          continue;
+        }
+        if (Math.abs(dist(a.pos, b.pos) - (a.pitch_r() + b.pitch_r())) <= this.mesh_tol) out.push([a, b]);
+      }
+    }
+    this.mesh_edges = out; return out;
+  }
+  _build_ratio_graph() {
+    const edges = this._build_mesh_edges();
+    const graph = new Map();
+    // Linkage-driven racks are kinematic: they're positioned in closed form, so
+    // they must NOT also be solved as dynamic nodes.
+    const nodes = this._active_tiles().filter(t => !(t.is_rack() && t.kinematic));
+    for (const t of nodes) graph.set(t, []);
+    for (const [a, b] of edges) {
+      if (!graph.has(a) || !graph.has(b)) continue;
+      if (a.is_rack() || b.is_rack()) {
+        // Rack <-> pinion:  v_rack = sign(perp) * r_pinion * omega_pinion.
+        // The rack node's "omega" is that linear speed, so the generic 1-DOF
+        // solver reflects its mass and any load correctly.
+        const rack = a.is_rack() ? a : b, gear = a.is_rack() ? b : a;
+        const perp = this._rack_engage(rack, gear);
+        if (perp === null) continue;
+        const k = Math.sign(perp) * gear.pitch_r();     // px per radian
+        if (Math.abs(k) <= 1e-9) continue;
+        graph.get(gear).push([rack, k]);
+        graph.get(rack).push([gear, 1/k]);
+        continue;
+      }
+      const ra = a.pitch_r(), rb = b.pitch_r();
+      if (a.is_ring() || b.is_ring()) {
+        const ring = a.is_ring() ? a : b, gear = a.is_ring() ? b : a;
+        const kind = this._ring_engage(ring, gear);
+        const rg = gear.pitch_r();
+        if (!kind || rg <= 1e-9) continue;
+        // internal: pinion inside the ring spins the SAME way (ratio uses inner
+        // pitch radius, +). external: outer teeth act like a normal gear (-).
+        const rr = kind === "internal" ? ring.inner_r() : ring.pitch_r();
+        const sign = kind === "internal" ? 1 : -1;
+        graph.get(ring).push([gear, sign * (rr / rg)]);
+        graph.get(gear).push([ring, sign * (rg / rr)]);
+        continue;
+      }
+      if (rb <= 1e-9 || ra <= 1e-9) continue;
+      graph.get(a).push([b, -(ra/rb)]);   // external mesh: opposite direction
+      graph.get(b).push([a, -(rb/ra)]);
+    }
+    // Shaft links: concentric gears share angular velocity (ratio +1).
+    for (const t of nodes) {
+      if (t.on_shaft_top && t.partner && graph.has(t.partner)) {
+        graph.get(t).push([t.partner, 1.0]);
+        graph.get(t.partner).push([t, 1.0]);
+      }
+    }
+    return graph;
+  }
+
+  // ---- dynamics ----
+  _solve_component_ratios(graph, start) {
+    const ratio = new Map([[start, 1.0]]); const dq = [start]; const eps = 1e-5;
+    while (dq.length) {
+      const cur = dq.shift(); const cr = ratio.get(cur);
+      for (const [nb, r] of graph.get(cur)) {
+        const implied = r*cr;
+        if (ratio.has(nb)) { if (Math.abs(ratio.get(nb) - implied) > eps) return [ratio, false]; }
+        else { ratio.set(nb, implied); dq.push(nb); }
+      }
+    }
+    return [ratio, true];
+  }
+  _collect_component_nodes(graph, start) {
+    const out = new Set([start]); const dq = [start];
+    while (dq.length) { const cur = dq.shift(); for (const [nb] of graph.get(cur)) if (!out.has(nb)) { out.add(nb); dq.push(nb); } }
+    return out;
+  }
+  _apply_drive_dynamics(dt) {
+    const graph = this._graph; const nodes = [...graph.keys()];
+    for (const t of nodes) t.locked = false;
+    const gain = DRIVE_SERVO_GAIN; const visited = new Set();
+    for (const start of nodes) {
+      if (visited.has(start)) continue;
+      const comp = this._collect_component_nodes(graph, start);
+      for (const t of comp) visited.add(t);
+      // Reference must be a GEAR: a rack's ratios are px/rad, so referencing one
+      // would rescale the baseline damping and change the train's behaviour.
+      const ref = [...comp].find(t => !t.is_rack()) || start;
+      const [ratios, ok] = this._solve_component_ratios(graph, ref);
+      if (!ok || ratios.size !== comp.size) { for (const t of comp) { t.omega = 0; t.torque = 0; t.locked = true; } continue; }
+      const drivers = [...comp].filter(t => t.is_driver);
+      const springs = [...comp].filter(t => t.is_spring());
+      // With no motor and no wound spring the train freewheels: it keeps its speed
+      // and spins down under damping (I*dw/dt = -B*w), rather than stopping dead.
+      const freewheel = !drivers.length && !springs.length;
+      let I_eff = 0, B_eff = DAMPING.viscous;
+      for (const t of comp) { const k = ratios.get(t); I_eff += t.inertia(this.Rp2)*k*k; B_eff += t.friction_b(this.Rp2)*k*k; }
+      if (freewheel) B_eff += DAMPING.coast;   // extra drag that sets the coast-down time
+      if (I_eff <= 1e-9) { for (const t of comp) { t.omega = 0; t.torque = 0; } continue; }
+      let T_drive = 0, B_motor = 0;
+      for (const d of drivers) { const kd = ratios.get(d); T_drive += gain*kd*d.drive_speed; B_motor += gain*kd*kd; }
+      // Spring torque, reflected to the reference gear:
+      //   tau_s = -SPRING_K * wind_s   (opposes the wind)
+      //   reflected: tau_s * k_s
+      let T_spring = 0;
+      for (const s of springs) {
+        const ks = ratios.get(s);
+        T_spring += -SPRING_K * s.wind * ks;
+        B_eff += DAMPING.spring * ks * ks;   // internal spring loss (settles the unwind)
+      }
+      let num = 0, den = 0;
+      for (const t of comp) { const k = ratios.get(t); num += t.omega*k; den += k*k; }
+      let omega_ref = den > 1e-9 ? num/den : 0;
+      const omega_before = omega_ref;
+      if (freewheel) {
+        // No forcing: I*dw/dt = -B*w. Integrate exactly so a low-inertia component
+        // (e.g. a disengaged rack) decays smoothly instead of overshooting/diverging.
+        omega_ref *= Math.exp(-(B_eff / I_eff) * dt);
+        if (Math.abs(omega_ref) < COAST_STOP_EPS) omega_ref = 0;   // settle to rest
+      } else {
+        const alpha = (T_drive + T_spring - (B_eff + B_motor)*omega_ref) / I_eff;
+        omega_ref = clampf(omega_ref + alpha*dt, -MAX_ABS_OMEGA, MAX_ABS_OMEGA);
+      }
+      // Integrate each spring's wind (dwind_s/dt = omega_s = k_s * omega_ref)
+      // and hard-stop the train if any spring reaches "fully wound".
+      let fullyWound = false;
+      for (const s of springs) {
+        const ks = ratios.get(s);
+        let w = s.wind + ks * omega_ref * dt;
+        if (w > SPRING_MAX_WIND) { w = SPRING_MAX_WIND; fullyWound = true; }
+        else if (w < -SPRING_MAX_WIND) { w = -SPRING_MAX_WIND; fullyWound = true; }
+        s.wind = w;
+      }
+      if (fullyWound) omega_ref = 0;   // can't wind further; spring torque unwinds it next frame
+      // Integrate rack travel (ds/dt = k_rack * omega_ref).
+      // Racks slide freely — no fixed end stop. A rack simply keeps moving until
+      // the pinion runs off the end of the bar, at which point the mesh drops
+      // (see _rack_engage) and the now-undriven rack freewheels to rest.
+      for (const rk of [...comp].filter(t => t.is_rack())) {
+        rk.s += ratios.get(rk) * omega_ref * dt; rk.sync_pos();
+      }
+      // Physical mechanical torque at the reference DOF: tau = I*alpha + B*omega
+      // (the servo's control stiffness B_motor is excluded — it isn't a real load).
+      // Reflect to each gear as tau/k, so slow/large gears show more torque, fast
+      // ones less — the speed/torque trade-off of a gear train.
+      const alpha_actual = (omega_ref - omega_before) / dt;
+      const tau_ref = I_eff * alpha_actual + B_eff * omega_ref;
+      for (const t of comp) {
+        const k = ratios.get(t);
+        t.omega = k * omega_ref; t.locked = false;
+        const raw = Math.abs(k) > 1e-9 ? tau_ref / k : 0;
+        t.torque = t.torque * 0.82 + raw * 0.18;   // light smoothing so the readout is steady
+      }
+    }
+  }
+
+  // ---- update ----
+  update(dt) {
+    if (this.mode === "menu") return;
+    this._ensure_rebuilt();
+    if (this.paused) return;
+    this._apply_drive_dynamics(dt);
+    for (const t of this.tile_list) {
+      if (t.is_rack()) continue;                       // racks translate (handled above)
+      if (!t.locked && t.omega !== 0) t.angle = (t.angle + t.omega*dt) % TAU;
+    }
+    this._solve_linkages(dt);
+    // A sliding rack changes which pinions it engages, so the topology is live.
+    if (this.tile_list.some(t => t.is_rack() && Math.abs(t.omega) > 1e-6)) this._mark_dirty();
+    if (this.mode === "puzzle" && !this.win) this._check_win();
+  }
+
+  // ---- linkages (kinematic crank-slider) ----
+  // A rod of fixed length L joins a pin on the gear (radius r_pin) to the slider's
+  // centre, which is confined to the rack's axis. Given the gear angle, solve
+  //   |P - (home + s*u)| = L   ->   s^2 - 2 s (A.u) + |A|^2 - L^2 = 0,  A = P - home
+  // and take the root nearest the current s (continuity through the stroke).
+  _link_pin(lk) {
+    const g = lk.gear, a = g.angle + lk.phase;
+    return [g.pos[0] + lk.r_pin*Math.cos(a), g.pos[1] + lk.r_pin*Math.sin(a)];
+  }
+  _solve_linkages(dt) {
+    for (const lk of this.links) {
+      const rk = lk.rack, u = rk.dir();
+      if (rk === this.drag_tile || lk.gear === this.drag_tile) continue;   // don't fight the drag
+      const P = this._link_pin(lk);
+      const A = [P[0] - rk.home[0], P[1] - rk.home[1]];
+      const au = A[0]*u[0] + A[1]*u[1];
+      const disc = au*au - (A[0]*A[0] + A[1]*A[1]) + lk.len*lk.len;
+      let s;
+      if (disc < 0) s = au;                       // rod can't reach: ride the closest point
+      else {
+        const root = Math.sqrt(disc), s1 = au + root, s2 = au - root;
+        s = Math.abs(s1 - rk.s) <= Math.abs(s2 - rk.s) ? s1 : s2;
+      }
+      // The crank-slider stroke is bounded by the geometry itself (|s| <= reach),
+      // so no artificial travel clamp is needed.
+      const prev = rk.s;
+      rk.s = s; rk.sync_pos();
+      rk.omega = dt > 1e-9 ? (s - prev)/dt : 0;   // linear speed, for the readout
+    }
+  }
+
+  // ---- drawing ----
+  draw_grid_points() { /* grid abandoned: gears snap by pitch tangency, not to a lattice */ }
+  _draw_links() {
+    for (const lk of this.links) {
+      const P = this._link_pin(lk), Q = lk.rack.pos;
+      G.stroke(COLOR_ROD[0], COLOR_ROD[1], COLOR_ROD[2], 0.95); G.strokeWeight(4);
+      G.line(P[0], P[1], Q[0], Q[1]);                    // connecting rod
+      G.fill(COLOR_ROD[0], COLOR_ROD[1], COLOR_ROD[2], 1.0);
+      for (const p of [P, Q]) G.ellipse(p[0]-3.5, p[1]-3.5, 7, 7);   // pins
+      G.strokeCircle(lk.gear.pos[0], lk.gear.pos[1], lk.r_pin, [1,1,1,0.18], 1);  // crank circle
+    }
+  }
+  draw_mesh_lines() {
+    if (!SHOW_MESH_LINES) return;
+    G.stroke(0.2,0.8,1.0,0.35); G.strokeWeight(4);
+    for (const [a, b] of this.mesh_edges) G.line(a.pos[0], a.pos[1], b.pos[0], b.pos[1]);
+  }
+  draw_pitch_circles() {
+    if (!SHOW_PITCH_CIRCLES) return;
+    for (const t of this.tile_list) G.strokeCircle(t.pos[0], t.pos[1], t.pitch_r(), [1,1,1,0.10], 2);
+  }
+  draw() {
+    const ctx = G.ctx;
+    G.background(this.bg[0], this.bg[1], this.bg[2]);
+    if (this.mode === "menu") { this._draw_main_menu(); return; }
+
+    // ---- world (under the view camera) ----
+    ctx.save();
+    ctx.translate(this.camPanX, this.camPanY);
+    ctx.scale(this.zoom, this.zoom);
+
+    if (this.mode === "puzzle") {
+      G.noFill(); G.stroke(1,1,1,0.08); G.strokeWeight(2);
+      G.rect(this.safe_margin, this.safe_margin, this.W - 2*this.safe_margin, this.H - 2*this.safe_margin);
+    }
+
+    this.draw_grid_points();
+    this.draw_pitch_circles();
+    this.draw_mesh_lines();
+    for (const t of [...this.tile_list].sort((a, b) => a.z - b.z)) t.draw();
+    if (this.mode === "puzzle") this._draw_roles();
+    this._draw_links();
+    this._draw_selected_highlight();
+    this._draw_readouts();
+
+    ctx.restore();
+
+    // ---- UI (fixed, not zoomed) ----
+    this.menu.draw();
+    this._draw_hud();
+    if (this.win) this._draw_win_overlay();
+  }
+  _draw_main_menu() {
+    const cx = this.W*0.5;
+    G.fill(1,1,1,0.95); G.text(GAME_TITLE, cx, this.H - 80, 46, "center");
+    G.fill(1,1,1,0.45); G.text("connect the drive gears to the targets", cx, this.H - 120, 15, "center");
+    for (const b of this.screen_buttons) b.draw();
+  }
+  _draw_roles() {
+    for (const t of this.tile_list) {
+      if (t.role === "drive") {
+        G.strokeCircle(t.pos[0], t.pos[1], t.pitch_r()*1.32, [0.25,0.7,1.0,0.9], 3);
+        this._tag(t, "DRIVE");
+      } else if (t.role === "driven") {
+        const col = Math.abs(t.omega) > WIN_SPIN_EPS ? [0.25,0.95,0.45,0.95] : [1.0,0.7,0.2,0.95];
+        G.strokeCircle(t.pos[0], t.pos[1], t.pitch_r()*1.32, col, 3);
+        this._tag(t, "TARGET");
+      }
+    }
+  }
+  _tag(t, text) { G.fill(1,1,1,0.8); G.text(text, t.pos[0]-22, t.pos[1] + t.pitch_r()*1.5, 11); }
+  _draw_win_overlay() {
+    G.fill(0,0,0,0.55); G._stroke = null;
+    G.rect(0, 0, this.W, this.H);
+    G.fill(0.3,0.95,0.5,0.95); G.text("LEVEL COMPLETE", this.W*0.5, this.H*0.5 + 120, 40, "center");
+    for (const b of this.screen_buttons) b.draw();
+  }
+  _draw_selected_highlight() {
+    const d = this.selected_driver;
+    if (!d || this.tile_list.indexOf(d) < 0) return;
+    G.strokeCircle(d.pos[0], d.pos[1], d.pitch_r()*1.25, [1,0.6,0.1,0.9], 3);
+  }
+  // Floating rpm/torque readouts: one per gear, lifted ABOVE the gear so it never
+  // covers the body, with a thin stem back to it. When two labels would overlap,
+  // the later one is pushed further up so text never stacks on text.
+  _draw_readouts() {
+    const gap = 9, stemGap = 12;
+    const items = [];
+    for (const t of this.tile_list) {
+      if (t.is_rack()) continue;                       // racks carry their own inline text
+      const lines = t.readout_lines(); if (!lines) continue;
+      const sz = G.pill_size(lines, RPM_FONT_SIZE);
+      // anchor point on the gear (top on screen = higher world y)
+      const anchorY = t.pos[1] + t.readout_top();
+      items.push({ t, cx: t.pos[0], anchorY, lines, bw: sz.bw, bh: sz.bh,
+                   cy: anchorY + stemGap + sz.bh/2 });   // pill centre in world coords
+    }
+    // Priority: selected/driver first, then bigger gears, so the important labels
+    // keep their spot and lesser ones get pushed up.
+    items.sort((a, b) => {
+      const pa = (a.t === this.selected_driver ? 2 : a.t.is_driver ? 1 : 0);
+      const pb = (b.t === this.selected_driver ? 2 : b.t.is_driver ? 1 : 0);
+      if (pa !== pb) return pb - pa;
+      return b.t.readout_top() - a.t.readout_top();
+    });
+    const placed = [];
+    for (const it of items) {
+      // push the pill upward (increasing world y) until it clears placed pills
+      for (let guard = 0; guard < 200; guard++) {
+        const clash = placed.find(p =>
+          Math.abs(p.cx - it.cx) < (p.bw + it.bw)/2 + gap &&
+          Math.abs(p.cy - it.cy) < (p.bh + it.bh)/2 + gap);
+        if (!clash) break;
+        it.cy = clash.cy + clash.bh/2 + it.bh/2 + gap;   // sit just above the clashing pill
+      }
+      placed.push(it);
+    }
+    for (const it of placed) {
+      // stem from the gear up to the pill's bottom edge
+      G.stroke(1,1,1,0.22); G.strokeWeight(1);
+      G.line(it.cx, it.anchorY, it.cx, it.cy - it.bh/2);
+      G.fill(1,1,1,0.25); G.ellipse(it.cx-1.6, it.anchorY-1.6, 3.2, 3.2);
+      G.label_pill(it.cx, it.cy, it.lines, RPM_FONT_SIZE);
+    }
+  }
+  _draw_hud() {
+    const info_x = MENU_PAD + MENU_W + 12;
+    if (this.mode === "puzzle") {
+      const lv = LEVELS[this.level_idx];
+      G.fill(1,1,1,0.9);
+      G.text("Level " + (this.level_idx+1) + ":  " + lv.name +
+             (this.zoom !== 1 ? "    (" + this.zoom.toFixed(1) + "x)" : ""), info_x, 14, 14);
+      G.fill(1,1,1,0.5);
+      G.text(lv.hint + "     scroll / pinch to zoom", info_x, this.H - 18, 12);
+      return;
+    }
+    const nd = this.tile_list.filter(t => t.is_driver).length;
+    const status = this.paused ? "PAUSED" : "RUN";
+    const sel = this.selected_driver ? (omega_to_rpm(this.selected_driver.drive_speed) >= 0 ? "+" : "") + omega_to_rpm(this.selected_driver.drive_speed).toFixed(0) + " rpm" : "none";
+    G.fill(1,1,1,0.86);
+    G.text(status + "   gears=" + this.tile_list.length + "   drivers=" + nd + "   selected target=" + sel +
+           "   damp=" + DAMPING.name +
+           "   edges=" + this.mesh_edges.length + (this.zoom !== 1 ? "   " + this.zoom.toFixed(1) + "x" : ""), info_x, 14, 13);
+    G.fill(1,1,1,0.45);
+    G.text("tap = driver   Speed -/+ = speed   drag = move   drop on menu = delete   scroll / pinch to zoom", info_x, this.H - 18, 12);
+  }
+  _sync_pause_label() { const b = this.menu.button("pause"); if (b) b.label = this.paused ? "Run" : "Pause"; }
+  _sync_damp_label() { const b = this.menu.button("damp"); if (b) b.label = "Damp: " + DAMPING.short; }
+
+  // ---- input ----
+  _pick_tile(p) {
+    const sorted = [...this.tile_list].sort((a, b) => b.z - a.z);
+    for (const t of sorted) if (t.contains(p)) return t;
+    return null;
+  }
+  _handle_menu(mid) {
+    if (["add_tri","add_u2","add_u3","add_u4","add_u5","add_sp","add_rack","add_ring"].includes(mid)) { this.add_gear_from_menu(mid); this._mark_dirty(); }
+    else if (mid === "add_link") { this._make_link(); }
+    else if (mid === "spd_up") this._adjust_selected_speed(SPEED_STEP_RPM);
+    else if (mid === "spd_dn") this._adjust_selected_speed(-SPEED_STEP_RPM);
+    else if (mid === "pause") { this.paused = !this.paused; this._sync_pause_label(); }
+    else if (mid === "damp") {
+      DAMP_MODE = (DAMP_MODE + 1) % DAMP_PRESETS.length;
+      DAMPING = DAMP_PRESETS[DAMP_MODE];
+      this._sync_damp_label();
+    }
+    else if (mid === "wind_up") {
+      // Pre-load every spring to +3 turns (well inside the hard stop and below
+      // the velocity clamp) so a low-damping swing starts immediately.
+      for (const t of this.tile_list) if (t.is_spring()) t.wind = 3 * TAU;
+    }
+    else if (mid === "reset") this._reset();
+    else if (mid === "restart") this.start_level(this.level_idx);
+    else if (mid === "to_menu") this.enter_main_menu();
+  }
+  _handle_screen_button(bid) {
+    if (bid === "free") this.start_free_play();
+    else if (bid === "menu") this.enter_main_menu();
+    else if (bid === "next") this.start_level(this.level_idx + 1);
+    else if (bid.indexOf("lvl_") === 0) this.start_level(parseInt(bid.split("_")[1], 10));
+  }
+  pointer_down(mx, my) {
+    const ui = this.screen_to_ui(mx, my);       // menus/HUD (unzoomed)
+    const world = this.screen_to_world(mx, my); // gears (camera)
+    this.touch_start = world;
+    if (this.mode === "menu" || this.win) {
+      for (const b of this.screen_buttons) if (b.hit(ui[0], ui[1])) { this._handle_screen_button(b.id); return; }
+      return;
+    }
+    const mid = this.menu.hit_test(ui[0], ui[1]);
+    if (mid !== null) { this._handle_menu(mid); return; }
+    const chosen = this._pick_tile(world);
+    if (!chosen || chosen.anchored) return;
+    // Grabbing a stacked top gear pulls it off the shaft.
+    if (chosen.on_shaft_top) this._unstack(chosen);
+    this.dragging = true; this.drag_tile = chosen; chosen.omega = 0;
+    chosen.drag_offset = [chosen.pos[0] - world[0], chosen.pos[1] - world[1]];
+    chosen.z = Math.max(...this.tile_list.map(t => t.z)) + 1;
+    this._mark_dirty();
+  }
+  pointer_move(mx, my) {
+    if (!this.dragging || !this.drag_tile) return;
+    const world = this.screen_to_world(mx, my);
+    const t = this.drag_tile;
+    t.pos = [world[0] + t.drag_offset[0], world[1] + t.drag_offset[1]]; t.omega = 0;
+    if (t.partner && !t.on_shaft_top) t.partner.pos = t.pos.slice();   // base carries its stack
+  }
+  pointer_up(mx, my) {
+    if (!this.dragging || !this.drag_tile) return;
+    const t = this.drag_tile; this.drag_tile = null; this.dragging = false;
+    const ui = this.screen_to_ui(mx, my);
+    const world = this.screen_to_world(mx, my);
+    if (this.menu.contains(ui[0], ui[1])) {
+      if (this.mode === "free") { this._delete_tile(t); this._mark_dirty(); return; }
+      // In puzzles the gears are limited, so don't lose them — snap back instead.
+    }
+    if (dist(world, this.touch_start) < this.tap_move_tol && this.mode === "free") { this._cycle_driver(t); this._replace_tile(t); this._mark_dirty(); return; }
+    // Dropped onto another gear's centre (and t carries no stack of its own)? Stack it.
+    const base = t.partner ? null : this._stack_target(t, world);
+    if (base) { this._stack_on(t, base); this._mark_dirty(); return; }
+    this._replace_tile(t); this._mark_dirty();
+  }
+}
+
+// Expose for headless testing
+if (typeof globalThis !== "undefined") globalThis.__GW = { Game, G, tri_to_screen, rpm_to_omega, omega_to_rpm, LEVELS };
+
+// ============================================================
+// Browser boot
+// ============================================================
+if (typeof document !== "undefined" && document.getElementById) {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  let W = 0, H = 0, dpr = 1, game = null;
+
+  function resize() {
+    dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.style.width = W + "px"; canvas.style.height = H + "px";
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!game) game = new Game(W, H); else game.set_size(W, H);
+  }
+  function sp(clientX, clientY) {      // client -> canvas CSS px (y-down)
+    const r = canvas.getBoundingClientRect();
+    return [clientX - r.left, clientY - r.top];
+  }
+
+  // ----- mouse -----
+  function mdown(e) { e.preventDefault(); const c = sp(e.clientX, e.clientY); game.pointer_down(c[0], c[1]); }
+  function mmove(e) { const c = sp(e.clientX, e.clientY); game.pointer_move(c[0], c[1]); }
+  function mup(e)   { const c = sp(e.clientX, e.clientY); game.pointer_up(c[0], c[1]); }
+  canvas.addEventListener("mousedown", mdown);
+  canvas.addEventListener("mousemove", mmove);
+  window.addEventListener("mouseup", mup);
+
+  // ----- mouse-wheel zoom (about the cursor) -----
+  canvas.addEventListener("wheel", (e) => {
+    if (game.mode === "menu") return;
+    e.preventDefault();
+    const c = sp(e.clientX, e.clientY);
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    game.zoom_at(c[0], c[1], factor);
+  }, { passive: false });
+
+  // ----- touch: 1 finger = drag, 2 fingers = pinch-zoom + pan -----
+  let pinch = null, suppressDrag = false;
+  function pinchState(e) {
+    const a = sp(e.touches[0].clientX, e.touches[0].clientY);
+    const b = sp(e.touches[1].clientX, e.touches[1].clientY);
+    return { dist: Math.hypot(a[0]-b[0], a[1]-b[1]), mx: (a[0]+b[0])/2, my: (a[1]+b[1])/2 };
+  }
+  canvas.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    if (e.touches.length >= 2) { suppressDrag = true; game.cancel_drag(); pinch = pinchState(e); }
+    else if (e.touches.length === 1 && !suppressDrag) { const c = sp(e.touches[0].clientX, e.touches[0].clientY); game.pointer_down(c[0], c[1]); }
+  }, { passive: false });
+  canvas.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    if (e.touches.length >= 2 && pinch && game.mode !== "menu") {
+      const p = pinchState(e);
+      if (p.dist > 0 && pinch.dist > 0) game.zoom_at(p.mx, p.my, p.dist / pinch.dist);
+      game.pan_by(p.mx - pinch.mx, p.my - pinch.my);
+      pinch = p;
+    } else if (e.touches.length === 1 && !suppressDrag) {
+      const c = sp(e.touches[0].clientX, e.touches[0].clientY); game.pointer_move(c[0], c[1]);
+    }
+  }, { passive: false });
+  function touchend(e) {
+    e.preventDefault();
+    if (e.touches.length < 2) pinch = null;
+    if (e.touches.length === 0) {
+      const c = sp(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+      game.pointer_up(c[0], c[1]);
+      suppressDrag = false;
+    }
+  }
+  canvas.addEventListener("touchend", touchend, { passive: false });
+  canvas.addEventListener("touchcancel", touchend, { passive: false });
+
+  window.addEventListener("resize", resize);
+
+  resize();
+  let last = performance.now();
+  function frame(now) {
+    let dt = (now - last) / 1000; last = now;
+    if (dt > 0.05) dt = 0.05; if (dt < 0) dt = 0;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // base transform each frame; draw() adds the camera
+    G.setCanvas(ctx, W, H);
+    game.update(dt);
+    game.draw();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+})();
+</script>
+</body>
+</html>
