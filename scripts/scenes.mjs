@@ -124,6 +124,44 @@ export const SCENES = {
   },
 };
 
+SCENES.win = {
+  label: "Level complete overlay",
+  frames: 60,
+  build: () => {
+    const g = window.__GW.game;
+    g.start_level(0); // "First Link" — one gear bridges the gap
+    const loose = g.tile_list.filter((t) => !t.anchored)[0];
+    const p = [g.origin[0], g.origin[1]];
+    loose.pos = p.slice();
+    g._snap_gear(loose, p.slice());
+    g._mark_dirty();
+    g._ensure_rebuilt();
+  },
+};
+
+SCENES.states = {
+  label: "Control states — hover, pressed, focus, latched",
+  frames: 20,
+  build: () => {
+    const g = window.__GW.game;
+    g.start_free_play();
+    g.paused = true;              // latched Pause + PAUSED status lamp
+    g._sync_pause_label();
+    g._handle_menu("damp");       // latched Damping (non-default preset)
+  },
+  after: async (page) => {
+    await page.hover('#rail .tile:nth-child(5)');
+    await page.evaluate(() => {
+      const b = document.querySelectorAll("#rail .btn");
+      b[b.length - 1].focus();     // focus-visible ring on Main Menu
+    });
+    await page.evaluate(() => {
+      document.querySelector("#rail .tile:nth-child(2)")
+        .dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+  },
+};
+
 export const VIEWPORTS = [
   { name: "desktop", width: 1280, height: 800 },
   { name: "mobile", width: 390, height: 844 },

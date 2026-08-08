@@ -126,6 +126,133 @@ for (const name of ["free", "puzzle", "planetary"]) {
   if (name === "planetary") check(`planetary: ring meshes engaged (${res.rings})`, res.rings >= 3);
 }
 
+// ---------------------------------------------------------------- interaction
+// The chrome layer sits over the canvas, so every pointer path it could have
+// broken gets exercised with REAL mouse events, not synthetic calls.
+console.log("\ninteraction through the chrome layer");
+{
+  const ip = await openPage(browser, { file: FILE, width: 1280, height: 800, dpr: 1 });
+  await ip.addScriptTag({ content: preamble });
+  const toScreen = (w) => ip.evaluate((wp) => {
+    const g = window.__GW.game;
+    return [g.camPanX + g.zoom * wp[0], g.camPanY + g.zoom * (g.H - wp[1])];
+  }, w);
+
+  // 1. a DOM rail tile adds a part to the canvas world
+  await ip.evaluate(() => { window.__GW.game.start_free_play(); window.__GW.step(2, 1 / 60); });
+  const before = await ip.evaluate(() => window.__GW.game.tile_list.length);
+  await ip.click('#rail .tile[aria-label="Add U4"]');
+  const after = await ip.evaluate(() => window.__GW.game.tile_list.length);
+  check("rail tile adds a part", after === before + 1, `${before} -> ${after}`);
+
+  // 2. tap-to-drive: press and release on a gear with no movement
+  const tap = await ip.evaluate(() => {
+    const g = window.__GW.game;
+    const t = g.tile_list.find((x) => !x.is_driver && !x.is_rack() && !x.is_ring());
+    return { uid: t.uid, pos: t.pos.slice(), was: t.is_driver };
+  });
+  let p1 = await toScreen(tap.pos);
+  await ip.mouse.move(p1[0], p1[1]);
+  await ip.mouse.down();
+  await ip.mouse.up();
+  const tapped = await ip.evaluate((uid) => {
+    const g = window.__GW.game, t = g.tile_list.find((x) => x.uid === uid);
+    if (!t) return { driver: false, selected: false, gone: true, mode: g.mode, n: g.tile_list.length };
+    return { driver: t.is_driver, selected: g.selected_driver === t };
+  }, tap.uid);
+  check("tap on a gear makes it the motor", tapped.driver && tapped.selected,
+    JSON.stringify(tapped));
+
+  // 3. drag: the gear follows the pointer and seats by pitch tangency
+  const drag = await ip.evaluate(() => {
+    const g = window.__GW.game;
+    const t = g.tile_list.find((x) => !x.anchored && !x.is_rack() && !x.is_ring() && !x.partner);
+    return { uid: t.uid, pos: t.pos.slice(), step: g.step };
+  });
+  p1 = await toScreen(drag.pos);
+  const p2 = await toScreen([drag.pos[0] + drag.step * 3, drag.pos[1] - drag.step * 2.5]);
+  await ip.mouse.move(p1[0], p1[1]);
+  await ip.mouse.down();
+  for (let i = 1; i <= 8; i++) {
+    await ip.mouse.move(p1[0] + (p2[0] - p1[0]) * i / 8, p1[1] + (p2[1] - p1[1]) * i / 8);
+  }
+  await ip.mouse.up();
+  const moved = await ip.evaluate((d) => {
+    const t = window.__GW.game.tile_list.find((x) => x.uid === d.uid);
+    return Math.hypot(t.pos[0] - d.pos[0], t.pos[1] - d.pos[1]);
+  }, drag);
+  check("drag moves a gear", moved > drag.step, `moved ${moved.toFixed(1)}px`);
+
+  // 4. drop on the tool rail scraps the part (the rail rect the chrome publishes)
+  const scrap = await ip.evaluate(() => {
+    const g = window.__GW.game;
+    const t = g.tile_list.find((x) => !x.anchored && !x.is_rack() && !x.is_ring() && !x.partner);
+    const r = document.getElementById("rail").getBoundingClientRect();
+    return { uid: t.uid, pos: t.pos.slice(), n: g.tile_list.length,
+             rail: [r.left + r.width / 2, r.top + r.height * 0.75] };
+  });
+  p1 = await toScreen(scrap.pos);
+  await ip.mouse.move(p1[0], p1[1]);
+  await ip.mouse.down();
+  await ip.mouse.move((p1[0] + scrap.rail[0]) / 2, (p1[1] + scrap.rail[1]) / 2);
+  await ip.mouse.move(scrap.rail[0], scrap.rail[1]);
+  await ip.mouse.up();
+  const left = await ip.evaluate((uid) => ({
+    n: window.__GW.game.tile_list.length,
+    gone: !window.__GW.game.tile_list.some((x) => x.uid === uid),
+  }), scrap.uid);
+  check("drop on the tool rail scraps a part", left.gone && left.n === scrap.n - 1,
+    `${scrap.n} -> ${left.n}, gone=${left.gone}`);
+
+  // 5. a title-screen level row starts that level
+  await ip.evaluate(() => { window.__GW.game.enter_main_menu(); window.__GW.step(2, 1 / 60); });
+  await ip.waitForTimeout(120);
+  await ip.click("#title-list .btn:nth-child(3)");
+  const lvl = await ip.evaluate(() => ({ mode: window.__GW.game.mode, idx: window.__GW.game.level_idx }));
+  check("title level row starts the level", lvl.mode === "puzzle" && lvl.idx === 1, JSON.stringify(lvl));
+
+  // 6. dragging an inventory gear into place solves the level and shows the overlay
+  const seat = await ip.evaluate(() => {
+    const g = window.__GW.game;
+    const loose = g.tile_list.filter((t) => !t.anchored);
+    const drive = g.tile_list.find((t) => t.role === "drive");
+    const targ = g.tile_list.find((t) => t.role === "driven");
+    // seat two by hand, drag the third with the mouse
+    [-2, 0].forEach((u, i) => {
+      const p = [g.origin[0] + g.Rp2 * u, drive.pos[1]];
+      loose[i].pos = p.slice(); g._snap_gear(loose[i], p.slice());
+    });
+    g._mark_dirty();
+    const t = loose[2];
+    return { uid: t.uid, from: t.pos.slice(), to: [g.origin[0] + g.Rp2 * 2, targ.pos[1]] };
+  });
+  p1 = await toScreen(seat.from);
+  const p3 = await toScreen(seat.to);
+  await ip.mouse.move(p1[0], p1[1]);
+  await ip.mouse.down();
+  for (let i = 1; i <= 10; i++) {
+    await ip.mouse.move(p1[0] + (p3[0] - p1[0]) * i / 10, p1[1] + (p3[1] - p1[1]) * i / 10);
+  }
+  await ip.mouse.up();
+  await ip.evaluate(() => window.__GW.step(120, 1 / 60));
+  await ip.waitForTimeout(200);
+  const won = await ip.evaluate(() => ({
+    win: window.__GW.game.win,
+    overlay: document.getElementById("winscreen").classList.contains("on"),
+    next: !!document.querySelector('#win-acts .btn[data-id="next"]'),
+  }));
+  check("mouse-dragging the last gear solves the level", won.win, JSON.stringify(won));
+  check("win overlay appears with a Next Level action", won.overlay && won.next, JSON.stringify(won));
+
+  // 7. and Next Level advances
+  if (won.next) {
+    await ip.click('#win-acts .btn[data-id="next"]');
+    const nx = await ip.evaluate(() => ({ idx: window.__GW.game.level_idx, win: window.__GW.game.win }));
+    check("Next Level advances", nx.idx === 2 && nx.win === false, JSON.stringify(nx));
+  }
+  await ip.close();
+}
+
 // ------------------------------------------------------------------- baseline
 console.log("\nbehavioural baseline (presentation-only guard)");
 const fingerprint = await page.evaluate(async (scenes) => {

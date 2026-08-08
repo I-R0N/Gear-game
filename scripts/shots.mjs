@@ -32,8 +32,9 @@ for (const vp of VIEWPORTS) {
     await page.evaluate(scene.build);
     await page.evaluate((f) => window.__GW.step(f, 1 / 60), scene.frames);
     // let CSS transitions on the chrome layer settle before we capture
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(600);
     await page.evaluate((f) => window.__GW.step(f, 1 / 60), 2);
+    if (scene.after) { await scene.after(page); await page.waitForTimeout(320); }
     const out = path.join(outDir, `${name}-${vp.name}.png`);
     await page.screenshot({ path: out });
     await page.close();

@@ -24,7 +24,7 @@
   --keycap:#1C2432; --keycap-hi:#273142;
   --groove:#05070A; --edge:#2A3446; --edge-hi:#43526E;
   /* ink */
-  --ink:#EAF0FA; --ink-2:#A2B0C6; --ink-3:#6C7A91; --ink-4:#46536A;
+  --ink:#EAF0FA; --ink-2:#A2B0C6; --ink-3:#8B98B0; --ink-4:#46536A;
   /* signal */
   --amber:#FFB020; --amber-hi:#FFD98A; --amber-dim:#6E4B10;
   --cyan:#5FD9FF; --cyan-hi:#B7EEFF; --cyan-dim:#17546B;
@@ -67,6 +67,17 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--void);
   font-family:var(--sans);font-size:var(--fs-body-sm);line-height:1.35}
 #ui > *{pointer-events:none}
 #ui button,#ui .interactive{pointer-events:auto}
+/* Anything faded out must also stop swallowing pointers. `visibility` carries a
+   transition delay, so hit-testing is switched off by pointer-events instead —
+   at ID specificity, otherwise `#ui button` wins and invisible controls keep
+   eating clicks meant for the bench underneath. */
+#ui .screen:not(.on),
+#ui .screen:not(.on) button{pointer-events:none}
+body[data-mode="menu"] #rail,
+body[data-mode="menu"] #topbar,
+body[data-mode="menu"] #hintbar,
+body[data-mode="menu"] #rail button,
+body[data-mode="menu"] #topbar button{pointer-events:none}
 
 /* ==========================================================================
    PRIMITIVES — panel / keycap button / chip / meter
@@ -162,6 +173,7 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--void);
   background:linear-gradient(180deg,transparent,var(--edge),transparent)}
 #topbar .grow{flex:1 1 auto;min-width:0}
 #topbar .meter{flex:0 0 auto}
+#topbar .mo{display:none}   /* mobile-only: on desktop this reading lives in the rail */
 #topbar .title{display:flex;align-items:center;gap:var(--sp-3);min-width:0}
 #topbar .title .name{font-size:var(--fs-body);font-weight:600;color:var(--ink);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -178,6 +190,16 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--void);
 #rail .group{display:flex;flex-direction:column;gap:var(--sp-2)}
 #rail .tray{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 #rail .row2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+/* level briefing — fills the puzzle rail with the thing the player needs */
+#brief{display:flex;flex-direction:column;gap:var(--sp-2);padding:var(--sp-3);
+  background:linear-gradient(180deg,rgba(255,255,255,.028),rgba(255,255,255,0));
+  border:1px solid var(--edge);border-radius:var(--r-2);box-shadow:var(--e-inset)}
+#brief .name{font-size:var(--fs-body-sm);font-weight:600;color:var(--ink);line-height:1.25}
+#brief .hint{font-size:var(--fs-caption);color:var(--ink-3);line-height:1.45}
+#brief .row{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-2)}
+#brief .row .v{font-family:var(--mono);font-size:var(--fs-body-sm);font-weight:600;
+  color:var(--cyan-hi);font-variant-numeric:tabular-nums}
+#brief .row .v.done{color:var(--green)}
 
 /* parts-tray tile: icon over a micro caption */
 .tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
@@ -213,15 +235,15 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--void);
 .stepper .read i{font-style:normal;font-size:8px;font-weight:600;letter-spacing:.14em;color:var(--ink-3)}
 
 /* the scrap tray: fills the rail's dead space AND is the drop-to-delete target */
-#tray{flex:1 1 auto;min-height:56px;display:flex;flex-direction:column;
+#tray{flex:1 1 auto;min-height:56px;max-height:210px;margin-top:auto;display:flex;flex-direction:column;
   align-items:center;justify-content:center;gap:6px;text-align:center;padding:var(--sp-3);
-  border:1px dashed var(--edge);border-radius:var(--r-2);color:var(--ink-4);
+  border:1px dashed var(--edge);border-radius:var(--r-2);color:var(--ink-2);
   background:repeating-linear-gradient(135deg,rgba(255,255,255,.014) 0 6px,transparent 6px 12px)}
-#tray .ico{width:20px;height:20px;color:var(--ink-4)}
+#tray .ico{width:20px;height:20px;color:var(--ink-3)}
 #tray .t{font-size:var(--fs-micro);font-weight:600;letter-spacing:.10em;text-transform:uppercase}
 #tray .s{font-size:var(--fs-caption);color:var(--ink-3);line-height:1.45;max-width:16ch}
-#tray.count{border-style:solid;border-color:var(--edge);background:var(--groove);
-  box-shadow:var(--e-inset);color:var(--ink-3);gap:2px}
+#tray.count{flex:0 0 auto;max-height:none;border-style:solid;border-color:var(--edge);
+  background:var(--groove);box-shadow:var(--e-inset);color:var(--ink-3);gap:2px;padding:var(--sp-3)}
 #tray.count .s{font-family:var(--mono);font-size:var(--fs-body);font-weight:500;color:var(--ink);
   font-variant-numeric:tabular-nums;max-width:none}
 #tray.armed{border-color:var(--red);color:var(--red);background:rgba(255,98,82,.06)}
@@ -271,7 +293,7 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
 #title .stack > .list{transition-delay:60ms}
 #title .stack > .colophon{transition-delay:120ms}
 #title .colophon{display:flex;justify-content:center;gap:var(--sp-4);font-size:var(--fs-micro);
-  letter-spacing:.10em;text-transform:uppercase;color:var(--ink-4)}
+  letter-spacing:.10em;text-transform:uppercase;color:var(--ink-3)}
 
 /* a level row is a keycap with an index chip, a name and a hint */
 .level-row{display:flex;align-items:center;gap:var(--sp-3);width:100%;min-height:52px;
@@ -291,12 +313,16 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
 .level-row:hover .go{color:var(--amber);transform:translateX(3px)}
 .level-row.wide{min-height:56px}
 
-#winscreen{background:rgba(6,8,11,.72);backdrop-filter:blur(6px)}
+#winscreen{background:radial-gradient(120% 80% at 50% 50%,rgba(6,8,11,.42),rgba(6,8,11,.80));
+  backdrop-filter:blur(2px)}
 #winscreen .card{padding:var(--sp-6) var(--sp-5) var(--sp-5);display:flex;flex-direction:column;
   align-items:center;gap:var(--sp-3);text-align:center;border-radius:var(--r-4);box-shadow:var(--e-3),var(--e-1)}
 #winscreen .seal{width:60px;height:60px;color:var(--green);filter:drop-shadow(0 4px 16px rgba(75,227,155,.3))}
 #winscreen h2{margin:0;font-size:var(--fs-title);font-weight:700;letter-spacing:.02em;color:var(--ink)}
 #winscreen .lv{font-size:var(--fs-body-sm);color:var(--ink-3)}
+#winscreen .stats{display:flex;gap:var(--sp-5);margin-top:var(--sp-1)}
+#winscreen .stats .meter{align-items:center}
+#winscreen .stats .v{font-size:var(--fs-subhead);font-weight:600}
 #winscreen .acts{display:flex;flex-direction:column;gap:var(--sp-2);width:100%;margin-top:var(--sp-2)}
 #winscreen .acts .btn{min-height:44px;justify-content:center}
 #winscreen .acts .btn .lbl{flex:0 1 auto;text-align:center}
@@ -323,9 +349,11 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
   .stepper button{flex:0 0 46px}
   .stepper .read{padding:0 var(--sp-3)}
   #topbar .lo{display:none}
+  #topbar .mo{display:flex}
   #topbar .title{flex:1 1 auto}
   #rail .group + .group{border-left:1px solid var(--edge);padding-left:6px}
-  #tray{flex:0 0 auto;min-width:74px;min-height:52px;padding:var(--sp-2) var(--sp-3)}
+  #brief{display:none}
+  #tray{flex:0 0 auto;min-width:74px;min-height:52px;max-height:none;margin-top:0;padding:var(--sp-2) var(--sp-3)}
   #tray:not(.count) .s{display:none}
   #tray.count .s{font-size:var(--fs-body-sm)}
   #hintbar{left:var(--sp-2);right:var(--sp-2);bottom:calc(var(--sp-2) + 68px);font-size:var(--fs-micro)}
@@ -337,6 +365,50 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
 }
 @media (max-width:760px) and (max-height:560px){
   #hintbar{display:none}
+}
+
+/* --- motion: entrance stagger, value flash, paused state --- */
+#rail .group,#rail #tray,#rail > .btn{opacity:0;transform:translateX(-6px);
+  transition:opacity var(--d-3) var(--ease-out),transform var(--d-3) var(--ease-out)}
+body[data-mode="free"] #rail .group,body[data-mode="free"] #rail #tray,body[data-mode="free"] #rail > .btn,
+body[data-mode="puzzle"] #rail .group,body[data-mode="puzzle"] #rail #tray,body[data-mode="puzzle"] #rail > .btn{
+  opacity:1;transform:none}
+#rail > *:nth-child(1){transition-delay:20ms}
+#rail > *:nth-child(2){transition-delay:56ms}
+#rail > *:nth-child(3){transition-delay:92ms}
+#rail > *:nth-child(4){transition-delay:128ms}
+#rail > *:nth-child(5){transition-delay:164ms}
+#title .stack > *:nth-child(1){transition-delay:0ms}
+#title .stack > *:nth-child(2){transition-delay:40ms}
+
+@keyframes valueFlash{
+  0%{color:var(--amber);text-shadow:0 0 12px rgba(255,176,32,.55)}
+  100%{color:inherit;text-shadow:none}
+}
+.flash{animation:valueFlash var(--d-3) var(--ease-out)}
+
+@keyframes sealIn{
+  from{opacity:0;transform:scale(.82) rotate(-14deg)}
+  to{opacity:1;transform:none}
+}
+#winscreen.on .seal{animation:sealIn 520ms var(--ease-out) both}
+#winscreen .acts .btn{transition-delay:0ms}
+#winscreen.on .acts .btn:nth-child(1){animation:riseIn 380ms var(--ease-out) 120ms both}
+#winscreen.on .acts .btn:nth-child(2){animation:riseIn 380ms var(--ease-out) 190ms both}
+@keyframes riseIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+body[data-paused="1"] #topbar{border-color:rgba(255,176,32,.38);
+  box-shadow:var(--e-1),inset 3px 0 0 var(--amber)}
+
+/* mobile: a fade at the dock's scrolling edge so it reads as scrollable */
+#railfade{display:none;position:absolute;pointer-events:none;
+  background:linear-gradient(90deg,rgba(11,14,20,0),rgba(11,14,20,.92))}
+
+@media (max-width:760px){
+  #railfade{display:block;right:var(--sp-2);bottom:var(--sp-2);width:52px;
+    height:calc(52px + 2 * var(--sp-2));border-radius:0 var(--r-3) var(--r-3) 0;
+    background:linear-gradient(90deg,rgba(13,17,26,0),rgba(13,17,26,.55) 45%,rgba(13,17,26,.97))}
+  #title .colophon{font-size:9px;gap:var(--sp-2)}
 }
 
 @media (prefers-reduced-motion:reduce){
@@ -353,6 +425,7 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
   <aside id="rail" aria-label="Tools"></aside>
 
   <div id="hintbar"></div>
+  <div id="railfade"></div>
 
   <section id="title" class="screen" aria-label="Main menu">
     <div class="stack">
@@ -374,6 +447,7 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
         <svg class="seal" viewBox="0 0 48 48" aria-hidden="true"><g id="winseal"></g></svg>
         <h2>LEVEL COMPLETE</h2>
         <div class="lv" id="win-sub"></div>
+        <div class="stats" id="win-stats"></div>
         <div class="acts" id="win-acts"></div>
       </div>
     </div>
@@ -450,7 +524,7 @@ const T = {
   // --- ink -----------------------------------------------------
   ink:       "#EAF0FA",
   ink2:      "#A2B0C6",
-  ink3:      "#6C7A91",
+  ink3:      "#8B98B0",
   ink4:      "#46536A",
   // --- signal --------------------------------------------------
   amber:     "#FFB020",
@@ -1425,6 +1499,10 @@ class GearMenu {
 // ============================================================
 const _roBuf = [];
 const _roPlaced = [];
+const _byZ = (a, b) => a.z - b.z;
+const _layers = new Map();   // baked full-screen backdrop / vignette bitmaps
+let _layerSize = "";
+const _zBuf = [];            // reusable z-sorted draw order
 class Game {
   constructor(W, H) {
     this.W = W; this.H = H;
@@ -1434,6 +1512,7 @@ class Game {
     this.dragging = false; this.drag_tile = null;
     this.touch_start = [0, 0]; this.paused = false; this.selected_driver = null;
     this.mesh_edges = []; this._graph = new Map(); this._topology_dirty = true;
+    this._flashes = []; this._meshSeen = null;
     this.zoom = 1; this.camPanX = 0; this.camPanY = 0;   // view camera
     this._recompute_geometry();
     this.mode = "menu"; this.level_idx = 0; this.win = false;
@@ -1613,6 +1692,39 @@ class Game {
     this._refresh_teeth_all();
     this._graph = this._build_ratio_graph();
     this._topology_dirty = false;
+    this._track_engagements();
+  }
+  // Presentation only: remember which pairs are meshed so a NEW engagement can
+  // be acknowledged with a one-shot ring at the contact point. Runs on topology
+  // change, not per frame.
+  _track_engagements() {
+    const cur = new Set();
+    for (const [a, b] of this.mesh_edges) {
+      const k = (a.uid < b.uid ? a.uid + "_" + b.uid : b.uid + "_" + a.uid);
+      cur.add(k);
+      if (this._meshSeen && !this._meshSeen.has(k)) {
+        const d = dist(a.pos, b.pos) || 1;
+        const f = clampf(a.pitch_r() / d, 0.1, 0.9);
+        this.flash(a.pos[0] + (b.pos[0] - a.pos[0]) * f,
+                   a.pos[1] + (b.pos[1] - a.pos[1]) * f, this.step * 0.85, T.cyan);
+      }
+    }
+    this._meshSeen = cur;
+  }
+  flash(x, y, r, color) {
+    if (this._flashes.length > 24) this._flashes.shift();
+    this._flashes.push({ x, y, r, c: color, t0: this.anim });
+  }
+  // One-shot rings: a mesh seating, a target coming alive. Driven by the
+  // presentation clock, so headless captures are reproducible.
+  _draw_flashes() {
+    const F = this._flashes;
+    for (let i = F.length - 1; i >= 0; i--) {
+      const f = F[i], age = (this.anim - f.t0) / 0.5;
+      if (age >= 1 || age < 0) { F.splice(i, 1); continue; }
+      const e = 1 - Math.pow(1 - age, 3);
+      G.ring(f.x, f.y, f.r * (0.2 + 0.9 * e), f.c, 0.6 * (1 - age), 3 * (1 - age) + 0.5);
+    }
   }
 
   // ---- placement (free positions, pitch-diameter snapping) ----
@@ -2225,31 +2337,42 @@ class Game {
     if (!SHOW_PITCH_CIRCLES) return;
     for (const t of this.tile_list) G.dashRing(t.pos[0], t.pos[1], t.pitch_r(), T.cyan, 0.10, 1, 3, 6, 0);
   }
-  // The milled plate the whole bench sits on: light pool, drafting lattice, vignette.
-  _draw_field(ctx) {
-    const W = this.W, H = this.H;
-    ctx.fillStyle = T.field;
-    ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = _gradC("POOL" + W + "x" + H, () => {
-      const g = ctx.createRadialGradient(W * 0.34, H * 0.20, 0, W * 0.34, H * 0.20, Math.max(W, H) * 0.92);
+  // The milled plate the whole bench sits on: light pool under the world, vignette
+  // over it. Both are full-screen radial gradients, which are expensive to
+  // rasterise every frame — so each is baked into an offscreen bitmap once per
+  // size and then blitted. Rebuilt only on resize.
+  _bake(kind) {
+    const size = this.W + "x" + this.H;
+    if (_layerSize !== size) { _layers.clear(); _layerSize = size; }   // drop on resize only
+    let c = _layers.get(kind);
+    if (c) return c;
+    c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(this.W));
+    c.height = Math.max(1, Math.round(this.H));
+    const x = c.getContext("2d");
+    const W = c.width, H = c.height;
+    if (kind === "pool") {
+      x.fillStyle = T.field;
+      x.fillRect(0, 0, W, H);
+      const g = x.createRadialGradient(W * 0.34, H * 0.20, 0, W * 0.34, H * 0.20, Math.max(W, H) * 0.92);
       g.addColorStop(0, ca(T.fieldHi, 0.95));
       g.addColorStop(0.55, ca(T.field, 0.6));
       g.addColorStop(1, ca(T.field, 0));
-      return g;
-    });
-    ctx.fillRect(0, 0, W, H);
-  }
-  _draw_vignette(ctx) {
-    const W = this.W, H = this.H;
-    ctx.fillStyle = _gradC("VIG" + W + "x" + H, () => {
-      const g = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.30,
-                                         W * 0.5, H * 0.5, Math.max(W, H) * 0.78);
+      x.fillStyle = g;
+      x.fillRect(0, 0, W, H);
+    } else {
+      const g = x.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.30,
+                                       W * 0.5, H * 0.5, Math.max(W, H) * 0.78);
       g.addColorStop(0, "rgba(6,8,11,0)");
       g.addColorStop(1, "rgba(6,8,11,0.62)");
-      return g;
-    });
-    ctx.fillRect(0, 0, W, H);
+      x.fillStyle = g;
+      x.fillRect(0, 0, W, H);
+    }
+    _layers.set(kind, c);
+    return c;
   }
+  _draw_field(ctx) { ctx.drawImage(this._bake("pool"), 0, 0, this.W, this.H); }
+  _draw_vignette(ctx) { ctx.drawImage(this._bake("vig"), 0, 0, this.W, this.H); }
   // Drafting lattice, drawn in world space so it pans and zooms with the bench.
   _draw_lattice(ctx) {
     const z = this.zoom;
@@ -2303,9 +2426,13 @@ class Game {
 
     this.draw_pitch_circles();
     this.draw_mesh_lines();
-    for (const t of [...this.tile_list].sort((a, b) => a.z - b.z)) t.draw();
+    _zBuf.length = 0;
+    for (const t of this.tile_list) _zBuf.push(t);
+    _zBuf.sort(_byZ);
+    for (const t of _zBuf) t.draw();
     if (this.mode === "puzzle") this._draw_roles();
     this._draw_links();
+    this._draw_flashes();
     this._draw_selected_highlight();
     this._draw_readouts();
 
@@ -2333,6 +2460,10 @@ class Game {
         this._draw_tag(t.pos[0], t.pos[1] - t.pitch_r() * 1.30 - 13, "DRIVE", T.amber);
       } else if (t.role === "driven") {
         const on = Math.abs(t.omega) > WIN_SPIN_EPS;
+        if (on !== !!t._live) {
+          t._live = on;
+          if (on) this.flash(t.pos[0], t.pos[1], t.pitch_r() * 2.4, T.green);
+        }
         const col = on ? T.green : T.ink2;
         if (on) {
           G.ring(t.pos[0], t.pos[1], t.pitch_r() * 1.30, col, 0.9, 2);
@@ -2365,14 +2496,18 @@ class Game {
   // top bar. Text never lands on metal; that is what the stem is for.
   _draw_readouts() {
     const items = _roBuf; items.length = 0;
-    const fontV = G.font(RPM_FONT_SIZE, 600, true);
-    const fontT = G.font(RPM_FONT_SIZE - 1, 500, true);
+    // Labels are instrument type: they shrink with the bench so a 390px screen
+    // does not end up with pills bigger than the gears they annotate.
+    const rs = clampf(this.step / 37.4, 0.78, 1.05);
+    const fs = RPM_FONT_SIZE * rs;
+    const fontV = G.font(fs, 600, true);
+    const fontT = G.font(fs - 1, 500, true);
     const reach = this.step * 4.2;
     for (const t of this.tile_list) {
       if (t.is_rack()) continue;                       // racks carry their own inline text
       const lines = t.readout_lines(); if (!lines) continue;
-      const bw = Math.max(G.measure(lines[0], fontV), G.measure(lines[1], fontT)) + 20;
-      const bh = 34;
+      const bw = Math.max(G.measure(lines[0], fontV), G.measure(lines[1], fontT)) + 18 * rs;
+      const bh = 32 * rs;
       // escape vector: away from crowded neighbours, biased upward
       let ex = 0, ey = 0;
       for (const o of this.tile_list) {
@@ -2388,8 +2523,8 @@ class Game {
       ey += 0.85;                                      // labels prefer to sit above
       const m = Math.hypot(ex, ey) || 1;
       ex /= m; ey /= m;
-      const r0 = t.readout_top() + 12 + bh / 2;
-      items.push({ t, ex, ey, bw, bh, lines, push: 0,
+      const r0 = t.readout_top() + 11 * rs + bh / 2;
+      items.push({ t, ex, ey, bx: ex, by: ey, bw, bh, lines, push: 0,
                    ax: t.pos[0], ay: t.pos[1], cx: 0, cy: 0, r0 });
     }
     // Priority: selected motor, then motors, then bigger gears — the labels that
@@ -2412,7 +2547,7 @@ class Game {
       it.ay = it.t.pos[1] + it.ey * (it.t.readout_top() + 2);
     };
     const placed = _roPlaced; placed.length = 0;
-    const maxPush = this.step * 5;
+    const maxPush = this.step * 3.2;
     for (const it of items) {
       place(it);
       for (let guard = 0; guard < 40 && it.push < maxPush; guard++) {
@@ -2431,29 +2566,71 @@ class Game {
           }
         }
         if (!hit) break;
-        it.push += 9;
+        // alternate a small rotation with a small push, so a pill orbits an
+        // obstacle rather than climbing straight over it and trailing a long stem
+        const k = Math.ceil((guard + 1) / 2) * 0.16 * ((guard % 2) ? -1 : 1);
+        const c = Math.cos(k), sn = Math.sin(k);
+        it.ex = it.bx * c - it.by * sn;
+        it.ey = it.bx * sn + it.by * c;
+        it.push += 6;
         place(it);
       }
       placed.push(it);
     }
+    // Relaxation: the greedy escape can still leave a pair touching in a dense
+    // cluster. Separate any survivors along their shallowest axis, letting the
+    // lower-priority pill give way. Pills never overlap after this.
+    for (let pass = 0; pass < 10; pass++) {
+      let moved = false;
+      for (let i = 0; i < placed.length; i++) {
+        for (let j = i + 1; j < placed.length; j++) {
+          const a = placed[i], b = placed[j];
+          const ox = (a.bw + b.bw) / 2 + 9 - Math.abs(a.cx - b.cx);
+          const oy = (a.bh + b.bh) / 2 + 9 - Math.abs(a.cy - b.cy);
+          if (ox <= 0 || oy <= 0) continue;
+          moved = true;
+          if (ox < oy) {
+            const sgn = a.cx < b.cx ? -1 : 1;
+            a.cx += sgn * ox * 0.32; b.cx -= sgn * ox * 0.68;
+          } else {
+            const sgn = a.cy < b.cy ? -1 : 1;
+            a.cy += sgn * oy * 0.32; b.cy -= sgn * oy * 0.68;
+          }
+        }
+      }
+      if (!moved) break;
+    }
+    for (const it of placed) {
+      it.cy = clampf(it.cy, yBot + it.bh / 2, yTop - it.bh / 2);
+      // keep a label tethered to its own gear
+      const dx = it.cx - it.t.pos[0], dy = it.cy - it.t.pos[1];
+      const d = Math.hypot(dx, dy), lim = it.r0 + this.step * 3.4;
+      if (d > lim) { it.cx = it.t.pos[0] + dx / d * lim; it.cy = it.t.pos[1] + dy / d * lim; }
+    }
     const ctx = G.ctx;
+    const bh0 = 7 * rs;
     for (const it of placed) {
       const sel = it.t === this.selected_driver;
       const accent = sel ? T.amber : (it.t.is_driver ? T.amber : T.cyan);
-      // stem: gear -> pill, with a tick at the gear end
+      // stem: gear -> pill, aimed at wherever the pill finally settled
+      let sx = it.cx - it.t.pos[0], sy = it.cy - it.t.pos[1];
+      const sl = Math.hypot(sx, sy) || 1; sx /= sl; sy /= sl;
+      it.ax = it.t.pos[0] + sx * (it.t.readout_top() + 2);
+      it.ay = it.t.pos[1] + sy * (it.t.readout_top() + 2);
       ctx.beginPath();
       ctx.moveTo(it.ax, G.fy(it.ay));
-      ctx.lineTo(it.cx - it.ex * it.bh * 0.5, G.fy(it.cy - it.ey * it.bh * 0.5));
+      ctx.lineTo(it.cx - sx * it.bh * 0.5, G.fy(it.cy - sy * it.bh * 0.5));
       ctx.strokeStyle = ca(T.cyan, 0.26); ctx.lineWidth = 1; ctx.stroke();
       ctx.beginPath(); ctx.arc(it.ax, G.fy(it.ay), 2, 0, TAU);
       ctx.fillStyle = ca(T.cyan, 0.5); ctx.fill();
       // pill: machined panel, cast shadow, accent stripe on the reading edge
       const x = it.cx - it.bw / 2, y = G.fy(it.cy) - it.bh / 2;
-      G.roundRect(x + 1, y + 3, it.bw, it.bh, 6);
+      const pr = 6 * rs;
+      G.roundRect(x + 1, y + 3, it.bw, it.bh, pr);
       ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fill();
-      G.roundRect(x, y, it.bw, it.bh, 6);
+      G.roundRect(x, y, it.bw, it.bh, pr);
       ctx.save(); ctx.translate(0, y);
-      ctx.fillStyle = _gradC("PILL" + it.bh, () => {
+      ctx.fillStyle = _gradC("PILL" + it.bh.toFixed(1), () => {
         const g = ctx.createLinearGradient(0, 0, 0, it.bh);
         g.addColorStop(0, "rgba(30,38,53,0.97)");
         g.addColorStop(1, "rgba(11,15,22,0.97)");
@@ -2462,15 +2639,15 @@ class Game {
       ctx.fill(); ctx.restore();
       ctx.strokeStyle = sel ? ca(T.amber, 0.6) : T.edge; ctx.lineWidth = 1; ctx.stroke();
       ctx.save();
-      G.roundRect(x, y, it.bw, it.bh, 6); ctx.clip();
+      G.roundRect(x, y, it.bw, it.bh, pr); ctx.clip();
       ctx.fillStyle = ca(accent, sel ? 0.95 : 0.55);
       ctx.fillRect(x, y, 2.5, it.bh);
       ctx.fillStyle = "rgba(255,255,255,0.07)";
       ctx.fillRect(x, y, it.bw, 1);
       ctx.restore();
-      G.label(it.lines[0], it.cx + 1, it.cy + 7, { size: RPM_FONT_SIZE, weight: 600, mono: true,
+      G.label(it.lines[0], it.cx + 1, it.cy + bh0, { size: fs, weight: 600, mono: true,
         align: "center", color: T.ink });
-      G.label(it.lines[1], it.cx + 1, it.cy - 7, { size: RPM_FONT_SIZE - 1, weight: 500, mono: true,
+      G.label(it.lines[1], it.cx + 1, it.cy - bh0, { size: fs - 1, weight: 500, mono: true,
         align: "center", color: T.cyanHi, alpha: 0.88 });
     }
   }
@@ -2658,7 +2835,7 @@ const CHROME = {
     this.el = {
       body: document.body, topbar: $("topbar"), rail: $("rail"), hint: $("hintbar"),
       title: $("title"), titleList: $("title-list"),
-      win: $("winscreen"), winSub: $("win-sub"), winActs: $("win-acts"),
+      win: $("winscreen"), winSub: $("win-sub"), winActs: $("win-acts"), winStats: $("win-stats"),
       canvas: $("c"),
     };
     $("brandgear").innerHTML = ICO.brand;
@@ -2679,12 +2856,13 @@ const CHROME = {
   svg(name, cls) {
     return '<svg class="' + (cls || "ico") + '" viewBox="0 0 24 24" aria-hidden="true">' + ICO[name] + "</svg>";
   },
-  btn(id, label, icon, cls, onClick) {
+  btn(id, label, icon, cls, onClick, iconRight) {
     const b = document.createElement("button");
     b.className = "btn " + (cls || "");
     b.type = "button";
     b.dataset.id = id;
-    b.innerHTML = (icon ? this.svg(icon) : "") + '<span class="lbl">' + label + "</span>";
+    const g = icon ? this.svg(icon) : "";
+    b.innerHTML = (iconRight ? "" : g) + '<span class="lbl">' + label + "</span>" + (iconRight ? g : "");
     b.addEventListener("click", onClick);
     return b;
   },
@@ -2731,11 +2909,17 @@ const CHROME = {
     this._winKey = key;
     const lv = LEVELS[game.level_idx];
     this.set(this.el.winSub, "Level " + (game.level_idx + 1) + " — " + lv.name);
+    // what the player actually built — a small, honest result readout
+    const parts = game.tile_list.filter((t) => !t.anchored).length;
+    this.el.winStats.innerHTML =
+      '<div class="meter"><span class="k">Parts placed</span><span class="v">' + parts + "</span></div>" +
+      '<div class="meter"><span class="k">Mesh points</span><span class="v cyan">' + game.mesh_edges.length + "</span></div>";
     const acts = this.el.winActs;
     acts.innerHTML = "";
     for (const [label, id] of game._win_items()) {
-      acts.appendChild(this.btn(id, label, id === "next" ? "go" : "back",
-        id === "next" ? "primary" : "", () => this.act(game, id)));
+      const next = id === "next";
+      acts.appendChild(this.btn(id, label, next ? "go" : "back",
+        next ? "primary" : "", () => this.act(game, id), next));
     }
   },
 
@@ -2767,6 +2951,7 @@ const CHROME = {
       this.el.lvname = t.querySelector("#lvname");
       const grow = document.createElement("div"); grow.className = "grow"; bar.appendChild(grow);
       add("targets", "Targets", "cyan");
+      this.el.m.targets.parentElement.classList.add("mo");
       sep(true);
       add("mesh", "Mesh", "", true);
       sep(true);
@@ -2860,7 +3045,18 @@ const CHROME = {
       }
       rail.appendChild(bench);
     } else {
-      const lvg = this.group("Level");
+      const lvg = this.group("Objective");
+      const lv = LEVELS[game.level_idx];
+      const brief = document.createElement("div");
+      brief.id = "brief";
+      brief.innerHTML =
+        '<span class="chip amber">Level ' + (game.level_idx + 1) + "</span>" +
+        '<span class="name">' + lv.name + "</span>" +
+        '<span class="hint">' + lv.hint + "</span>" +
+        '<span class="row"><span class="k eyebrow" style="flex:0 0 auto">Targets</span>' +
+        '<span class="v"></span></span>';
+      this.el.r = { targets: brief.querySelector(".row .v") };
+      lvg.appendChild(brief);
       if (has("restart")) lvg.appendChild(this.btn("restart", "Restart", "restart", "", () => game._handle_menu("restart")));
       rail.appendChild(lvg);
     }
@@ -2921,9 +3117,15 @@ const CHROME = {
       const left = game.tile_list.filter((t) => !t.anchored).length;
       const seated = game.tile_list.filter((t) => !t.anchored && game.mesh_edges.some(([a, b]) => a === t || b === t)).length;
       if (this.el.trayS) this.set(this.el.trayS, seated + " / " + left);
+      if (this.el.r && this.el.r.targets) {
+        this.set(this.el.r.targets, on + " / " + driven.length);
+        this.el.r.targets.classList.toggle("done", !!driven.length && on === driven.length);
+      }
     } else {
       this.set(m.status, game.paused ? "PAUSED" : "RUNNING");
       this.el.lamp.classList.toggle("hold", game.paused);
+      const ps = game.paused ? "1" : "0";
+      if (this.el.body.dataset.paused !== ps) this.el.body.dataset.paused = ps;
       const d = game.selected_driver;
       const rpm = d ? omega_to_rpm(d.drive_speed) : 0;
       this.set(m.motor, d ? (rpm >= 0 ? "+" : "") + rpm.toFixed(0) : "—");
@@ -2933,12 +3135,26 @@ const CHROME = {
       this.set(m.damp, DAMPING.name);
       this.set(m.zoom, game.zoom.toFixed(2) + "×");
       const r = this.el.r;
-      if (r.rpm) this.set(r.rpm, d ? (rpm >= 0 ? "+" : "") + rpm.toFixed(0) : "—");
-      if (r.damp) this.set(r.damp, DAMPING.short);
+      if (r.rpm) {
+        const txt = d ? (rpm >= 0 ? "+" : "") + rpm.toFixed(0) : "—";
+        if (this._txt.get(r.rpm) !== txt) {
+          this.set(r.rpm, txt);
+          r.rpm.classList.remove("flash");
+          void r.rpm.offsetWidth;              // restart the keyframe
+          r.rpm.classList.add("flash");
+        }
+      }
+      if (r.damp) {
+        this.set(r.damp, DAMPING.short);
+        const b = r.damp.parentElement;
+        if (b) b.setAttribute("aria-pressed", DAMP_MODE ? "true" : "false");
+      }
       if (r.pause) {
         const lbl = game.paused ? "Run" : "Pause";
         this.set(r.pause.querySelector(".lbl"), lbl);
-        r.pause.setAttribute("aria-pressed", game.paused ? "true" : "false");
+        // paused is a held state shown by the status lamp and the bar; the button
+        // itself becomes the primary action to get moving again
+        r.pause.classList.toggle("primary", game.paused);
         const want = game.paused ? ICO.play : ICO.pause;
         if (r.pause._ico !== want) { r.pause._ico = want; r.pause.querySelector("svg").innerHTML = want; }
       }
@@ -2952,8 +3168,12 @@ const CHROME = {
   // Publish the rail's screen rect back to the game so drop-to-scrap keeps working.
   measure(game) {
     this._needRect = false;
-    const r = this.el.rail.getBoundingClientRect();
-    game.menu.set_rect(r.left, game.H - (r.top + r.height), r.width, r.height);
+    const el = this.el.rail;
+    // offset* is the laid-out box; getBoundingClientRect would fold in the
+    // entrance transform and leave the drop zone a few pixels off.
+    const w = el.offsetWidth, h = el.offsetHeight;
+    if (!w || !h) { this._needRect = true; return; }
+    game.menu.set_rect(el.offsetLeft, game.H - (el.offsetTop + h), w, h);
   },
 };
 
@@ -3004,7 +3224,9 @@ if (typeof document !== "undefined" && document.getElementById) {
   }
   function mup(e)   { const c = sp(e.clientX, e.clientY); game.pointer_up(c[0], c[1]); setCursor(""); }
   canvas.addEventListener("mousedown", mdown);
-  canvas.addEventListener("mousemove", mmove);
+  // on window, not the canvas: a drag that crosses the chrome layer (e.g. on its
+  // way to the scrap tray) must keep tracking the part
+  window.addEventListener("mousemove", mmove);
   window.addEventListener("mouseup", mup);
 
   // ----- mouse-wheel zoom (about the cursor) -----

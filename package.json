@@ -6,7 +6,8 @@
     "test": "node scripts/test.mjs",
     "shots": "node scripts/shots.mjs",
     "shots:before": "node scripts/shots.mjs --out shots/before --clean",
-    "shots:after": "node scripts/shots.mjs --out shots/after --clean"
+    "shots:after": "node scripts/shots.mjs --out shots/after --clean",
+    "audit": "node scripts/audit.mjs"
   },
   "repository": {
     "type": "git",
