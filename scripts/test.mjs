@@ -142,6 +142,21 @@ for (let i = 0; i < LEVELS.length; i++) {
   }
   check(`${label} needs all ${lv.solution.length} of its parts`, bad.length === 0,
     "still wins without " + bad.join(", "));
+  // The board's fixtures must not look like the stock in the tray. Anchors are cast
+  // in role metal — amber for the motor, green for what it is asking for — so "can I
+  // pick this up" is answered by colour before any ring or label is read. Springs are
+  // exempt: their coil already runs green to red to show the wind.
+  const paint = await page.evaluate((i) => {
+    const g = window.__GW.game;
+    g.start_level(i);
+    const A = window.__GW.alloy_for;
+    const anchors = g.tile_list.filter(t => t.anchored && !t.is_spring() && !t.is_rack() && !t.is_ring());
+    const loose = g.tile_list.filter(t => !t.anchored);
+    return { anchors: anchors.map(t => [t.role, A(t)]), loose: [...new Set(loose.map(t => A(t)))] };
+  }, i);
+  const clash = paint.anchors.filter(([, c]) => paint.loose.includes(c));
+  check(`${label} paints its anchors in role metal, not stock metal`,
+    clash.length === 0, JSON.stringify({ clash, loose: paint.loose }));
   // A player found this one: spin a target up, cut the gear feeding it, and cash the
   // win while it is still coasting. Cut the train and watch every frame of the
   // spin-down — no target may report satisfied on any of them.

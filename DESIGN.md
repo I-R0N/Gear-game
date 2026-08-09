@@ -85,7 +85,7 @@ CSS custom properties on `:root` (for chrome) and the `T` object (for canvas).
 
 | Token | Hex | Part |
 | --- | --- | --- |
-| `--alloy-u1` | `#7C5FB4` | U1 triangle — anodised violet |
+| `--alloy-u1` | `#7C5FB4` | U1 — anodised violet |
 | `--alloy-u2` | `#2E8B85` | U2 — anodised teal |
 | `--alloy-u3` | `#B0783F` | U3 — anodised bronze |
 | `--alloy-u4` | `#AC4D63` | U4 — anodised crimson |
@@ -95,13 +95,36 @@ CSS custom properties on `:root` (for chrome) and the `T` object (for canvas).
 | `--alloy-ring` | `#2F7F6E` | ring gear — anodised sea |
 | `--alloy-rod` | `#D2A24A` | linkage rod — brass |
 
+### Alloy (role-coded — campaign anchors only)
+
+A level's motor and its targets are bolted to the board and are not yours to move, so
+they are cast in their own metal instead of borrowing the size palette from the loose
+stock in the tray. One look answers "can I pick this up", before any ring or label is
+read. The hue follows the language the rings and labels already use.
+
+| Token | Hex | Part |
+| --- | --- | --- |
+| `--alloy-drive` | `#8E6A16` | anchored motor — dark gold |
+| `--alloy-driven` | `#256F52` | anchored target — deep green |
+
+A spring keeps `--alloy-sp` in either role: its coil already runs green → amber → red to
+show how far it is wound, and a green plate under a green coil takes that reading away.
+`npm test` asserts, per level, that no anchor shares a base alloy with any loose part.
+
 ### Part silhouettes
 
 Gears are **cut blanks, not tiles**. The body is a disc out to the root circle with the
 teeth standing proud of it, exactly the way a cut gear looks, and six lightening holes are
 bored through the web — genuinely see-through, which is what lets a stacked gear read
-through the one on top of it. The U1 triangle keeps its plate: it is the one part the level
-content names by shape ("spin the little triangle gear"), so it stays a triangle.
+through the one on top of it. **Every** gear, including the U1: it used to carry a
+triangular plate 1.5× its pitch radius, a survivor of the hex-plate era and the only part
+still wearing a shape instead of a size. Nothing in the campaign names a part by shape, so
+there was nothing left for it to say.
+
+Gears cast no shadow. Each one used to trail a dark crescent under its lower edge, which
+is fine on one gear and a mess on twenty overlapping ones — a compound train stacked four
+of them into a smear that read as dirt rather than as depth. The bevel, the engraved root
+circle and the punched windows carry the relief instead.
 
 Two parts carry openings of their own, both punched with the same even-odd technique so
 the field shows through:
