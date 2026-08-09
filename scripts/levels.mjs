@@ -115,6 +115,7 @@ window.__L = {
     return this.report(idx);
   },
 
+
   // Direction is a thing several levels ask the player to READ, and a gear whose
   // teeth advance more than half a tooth pitch per frame is a gear whose direction
   // cannot be read — it strobes, exactly like a wagon wheel in a film. Returns the
@@ -188,6 +189,7 @@ window.__L = {
     return {
       idx, name: lv.name,
       win: g.win,
+      stars: g._stars || 0, partsUsed: g.parts_used(), par: g.par(),
       locked: g.tile_list.filter(t => t.locked).length,
       edges: g.mesh_edges.length,
       edgeKeys: this.edgeKeys(),

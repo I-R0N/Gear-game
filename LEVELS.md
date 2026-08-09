@@ -85,6 +85,57 @@ Four deliberate features, each of which would otherwise read as a defect:
   middle of the run-up. Mechanism first (16, 17), then the same mechanisms wearing their
   dials (18, 19), then both at once.
 
+## Scoring
+
+Every level ships **more parts than its answer needs** — one spare on level 1, two on
+every other level — so "how few parts" is a question the level can actually ask. Three
+stars is solving it with the answer's part count, two is one part over, one is anything
+more.
+
+A part counts when it is placed *and* connected to a motor. A spare left in the tray, or
+dropped somewhere idle, is not part of the machine — and the check is the solver's own:
+`_apply_drive_dynamics` already stamps every node in a driven component with its ratio to
+the motor, so "is this thing in the train" is answered by the same code that decides how
+fast it turns.
+
+The score never goes down. It is re-evaluated while the level stays solved, so a player
+who finds a cheaper build after the completion sheet appears keeps the better result, and
+pulling the machine apart afterwards cannot cost them the stars they earned.
+
+This also changed what the cheese tests assert. "Cannot be won badly" was the wrong bar
+once spares existed — a scruffy build that satisfies the goal *has* satisfied the goal.
+The bar is now that a degenerate placement must never earn **three stars**, which is a
+statement about the score doing its job rather than about the level being unbreakable.
+
+## Speed, and why every level is slower than it was
+
+A gear whose teeth advance more than half a tooth pitch per frame strobes: its direction
+becomes genuinely unreadable, the wagon-wheel effect. Direction is what levels 3 and 7 ask
+the player to read, and every `ratio` goal carries a direction with it, so this is a
+correctness problem and not a taste one.
+
+```
+alias = |rpm| × teeth / 1800          1.0 = ambiguous, under ~0.5 = comfortable
+```
+
+It is **teeth-dependent**, so a `U5` strobes at a third of the rpm a `U1` does, and the
+fastest part in a train is not always the one that binds — level 10 is an 8:1 speed-up
+whose middle pinion runs at 4× the drive, and that pinion sets the level's speed. Nine of
+the twenty levels used to be over 1.0 outright and seven more were over 0.5. Every drive
+was retuned against the limit; `npm test` measures peak and steady alias on all twenty.
+
+## Reading the machine
+
+Ratios are the campaign's constraint, and a damped train takes seconds to settle, so
+reading them off the rpm numbers is guesswork. The floating readouts show **ratio to the
+motor** by default in the campaign — `1 : 1`, `1 : 2.5`, `1 : 10`, `1 : 30` down a
+compound train — taken straight out of the ratio solve, which means they are exact from
+the first frame while the rpm numbers are still moving.
+
+A rail button cycles **Ratio / Speed / Off**. Speed is the rpm-and-torque pair (and the
+free-play default, because the bench is where torque matters); Off is there because the
+pills are a lot of furniture on a small screen.
+
 ## The rules every level is held to
 
 Each of these is an assertion in `npm test`, run against all twenty levels every time:
@@ -98,8 +149,13 @@ Each of these is an assertion in `npm test`, run against all twenty levels every
   rules in `CLOCK.md`, both of which cost a spike round.
 * **0.30u of clearance** between any pair that is not meshed and not on one shaft, against
   an engine mesh tolerance of 0.15u.
-* **Every placed part is load-bearing.** Removing any single part must break the win, so a
-  level cannot pad its part count.
+* **Every part of the ANSWER is load-bearing.** Removing any single part of the par
+  solution must break the win, so a level cannot pad the score it asks for.
+* **The par answer scores three stars**, and no degenerate placement does.
+* **Nothing strobes.** Steady alias ≤ 0.5 and peak ≤ 0.75 on every level.
+* **Readouts hold still.** 240 frames of a settled board on three levels, with no pill
+  moving more than half a pixel. They used to wander, because a pill's width tracked its
+  own text and a settling train rewrites those digits every frame.
 * **No cheese.** Dumping the inventory around the motor in a rosette must not win, on any
   level. Chaining it blindly at the target must not win either, except on levels 1, 2, 5,
   6 and 13, which declare `naive_solves` — there the obvious chain *is* the answer, and

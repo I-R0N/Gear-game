@@ -101,26 +101,38 @@ for (let i = 0; i < LEVELS.length; i++) {
   check(`${label} keeps ${MIN_CLEARANCE} clearance off an accidental mesh`,
     !want.tight.length && r.tightest.clearance >= MIN_CLEARANCE - 1e-9,
     (want.tight.join(", ") || "") + " nearest " + r.tightest.pair + " " + r.tightest.clearance);
-  check(`${label} inventory matches its solution`,
-    lv.inventory.length === lv.solution.length &&
-    lv.inventory.every((t, k) => t === lv.solution[k].type),
+  // The inventory starts with the answer's parts, in order — the harness indexes
+  // loose parts by solution position — and then carries spares, so that "how few
+  // parts" is a question the level can actually ask.
+  check(`${label} ships ${lv.inventory.length - lv.solution.length} spare(s) beyond its ${lv.solution.length}-part answer`,
+    lv.inventory.length > lv.solution.length &&
+    lv.solution.every((sp, k) => lv.inventory[k] === sp.type),
     `inventory ${lv.inventory.join(",")} vs solution ${lv.solution.map((s) => s.type).join(",")}`);
+  check(`${label} scores three stars for the ${lv.solution.length}-part answer`,
+    r.stars === 3 && r.partsUsed === lv.solution.length,
+    `stars=${r.stars} used=${r.partsUsed} par=${lv.solution.length}`);
 }
 
 // ------------------------------------------------------------------ no cheese
 console.log("\nno cheese");
 for (let i = 0; i < LEVELS.length; i++) {
   const lv = LEVELS[i], label = `${i + 1} "${lv.name}"`;
+  // Now that every level ships spares, "cannot be won badly" is the wrong bar —
+  // a scruffy build that happens to satisfy the goal HAS satisfied the goal, and
+  // the score is what should punish it. The bar is: a degenerate placement must
+  // never earn three stars.
   const heap = await page.evaluate((i) => window.__L.heap(i), i);
-  check(`${label} is not won by tipping the inventory into a heap`, heap.win === false,
-    JSON.stringify(heap.targets));
+  check(`${label} is not solved WELL by tipping the inventory into a heap`,
+    heap.win === false || heap.stars < 3,
+    `win=${heap.win} stars=${heap.stars} used=${heap.partsUsed}/${heap.par}`);
   const naive = await page.evaluate((i) => window.__L.naive(i), i);
   if (lv.naive_solves) {
     check(`${label} IS won by the obvious chain (declared: it is the tutorial)`, naive.win === true,
       JSON.stringify(naive.targets));
   } else {
-    check(`${label} is not won by blindly chaining off the drive`, naive.win === false,
-      JSON.stringify(naive.targets));
+    check(`${label} is not solved WELL by blindly chaining off the drive`,
+      naive.win === false || naive.stars < 3,
+      `win=${naive.win} stars=${naive.stars} used=${naive.partsUsed}/${naive.par}`);
   }
   // every placed part is load-bearing
   const bad = [];

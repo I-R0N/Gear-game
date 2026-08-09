@@ -209,6 +209,8 @@ body[data-mode="menu"] #topbar button{pointer-events:none}
   transition:background var(--d-2) var(--ease-out),border-color var(--d-2) var(--ease-out)}
 #brief .goal.done{color:var(--green)}
 #brief .goal.done .dot{background:var(--green);border-color:var(--green)}
+/* over par is information, not a failure: the level is still winnable, for less */
+#tray .s.over{color:var(--amber)}
 
 /* parts-tray tile: icon over a micro caption */
 .tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
@@ -352,7 +354,10 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
   text-transform:uppercase;color:var(--green)}
 #winscreen .lv{font-size:var(--fs-body);font-weight:600;color:var(--ink);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#winscreen .stats{display:flex;gap:var(--sp-5);margin-left:auto}
+#winscreen .stats{display:flex;align-items:center;gap:var(--sp-4);margin-left:auto}
+#winscreen .stars{display:flex;gap:3px}
+#winscreen .stars .st{width:19px;height:19px;color:var(--ink-4)}
+#winscreen .stars .st.on{color:var(--amber);filter:drop-shadow(0 1px 6px rgba(255,176,32,.45))}
 #winscreen .stats .v{font-size:var(--fs-body);font-weight:600}
 #winscreen .acts{display:flex;gap:var(--sp-2);flex:0 0 auto}
 #winscreen .acts .btn{min-height:44px;justify-content:center}
@@ -728,6 +733,11 @@ const HEX_MULT  = { U2: 1.0, U3: 1.5, U4: 2.0, U5: 2.5, SP: 1.5 };
 // Game / puzzle content
 // ============================================================
 const GAME_TITLE = "GEAR WORKS";
+// What the floating readouts say. Ratio is the campaign default because ratio is
+// what every goal is written in; Speed is the bench default because free play is
+// where torque matters. Off is there because they are a lot of furniture.
+const READOUT_MODES = ["ratio", "speed", "off"];
+const READOUT_LABEL = { ratio: "Ratio", speed: "Speed", off: "Off" };
 // "Is it turning at all". Small on purpose: a clock's hour hand runs at a fifth of
 // an rpm, and the coast integrator snaps a freewheeling part below COAST_STOP_EPS
 // to exactly zero, so a stopped part reads 0 rather than something tiny.
@@ -759,7 +769,11 @@ const STAGE_GAP = 0.42;          // clear space between staged inventory parts
 //
 //   drives:  [{ pos, type, rpm, id?, hand?, dial? }]      anchored motors
 //   driven:  [{ pos, type, id?, hand?, dial?, ...goal }]  anchored targets
-//   inventory: [type...]                                  the player's parts
+//   inventory: [type...]   the player's parts. It always starts with exactly the
+//              solution's types in order, then carries SPARES beyond them: three
+//              stars is solving with the solution's part count, two is one over,
+//              one is anything more. A level with no slack has no score to play
+//              for, so every level has slack.
 //   solution:  [{ type, pos, stack? }]                    the machine-checkable
 //              answer: `stack` is the 0-based index of an earlier solution entry,
 //              or a drive/driven `id`, whose shaft this part rides on.
@@ -776,7 +790,7 @@ const STAGE_GAP = 0.42;          // clear space between staged inventory parts
 const LEVELS = [
   { name: "First Mesh",
     hint: "Drag the gear between the two so all three teeth-sets touch.",
-    inventory: ["U2"],
+    inventory: ["U2", "U2"],
     drives: [{ pos: [-2, 0], rpm: 36, type: "U2" }],
     driven: [{ pos: [2, 0], type: "U2" }],
     solution: [{ type: "U2", pos: [0, 0] }],
@@ -784,7 +798,7 @@ const LEVELS = [
 
   { name: "Straight Run",
     hint: "One gear cannot bridge this. Three in a row can.",
-    inventory: ["U2", "U2", "U2"],
+    inventory: ["U2", "U2", "U2", "U2", "U2"],
     drives: [{ pos: [-4, 0], rpm: 36, type: "U2" }],
     driven: [{ pos: [4, 0], type: "U2" }],
     solution: [{ type: "U2", pos: [-2, 0] }, { type: "U2", pos: [0, 0] },
@@ -793,7 +807,7 @@ const LEVELS = [
 
   { name: "Turn It Around",
     hint: "Every mesh reverses the spin. The target must turn the motor's way — count the meshes, not the gears.",
-    inventory: ["U2", "U2", "U2"],
+    inventory: ["U2", "U2", "U2", "U2", "U2"],
     drives: [{ pos: [-4, 0], rpm: 36, type: "U2" }],
     driven: [{ pos: [2, 0], type: "U2", spin: 1 }],
     solution: [{ type: "U2", pos: [-3, 1.7320508] }, { type: "U2", pos: [-1, 1.7320508] },
@@ -801,7 +815,7 @@ const LEVELS = [
 
   { name: "Split the Power",
     hint: "One gear can drive two. Find the hub, then branch.",
-    inventory: ["U2", "U2", "U2"],
+    inventory: ["U2", "U2", "U2", "U2", "U2"],
     drives: [{ pos: [-3, 0], rpm: 36, type: "U2" }],
     driven: [{ pos: [1, 2.6], type: "U2" }, { pos: [1, -2.6], type: "U2" }],
     solution: [{ type: "U2", pos: [-1, 0] },
@@ -810,7 +824,7 @@ const LEVELS = [
 
   { name: "Gearing Up",
     hint: "A big wheel driving a small one buys speed with torque. Five turns out for every one in.",
-    inventory: ["U2", "U2"],
+    inventory: ["U2", "U2", "U2", "U2"],
     drives: [{ pos: [-4, 0], rpm: 16, type: "U5", id: "motor" }],
     driven: [{ pos: [3, 0], type: "U1", ratio: { of: "motor", value: -5 } }],
     solution: [{ type: "U2", pos: [-0.5, 0] }, { type: "U2", pos: [1.5, 0] }],
@@ -818,7 +832,7 @@ const LEVELS = [
 
   { name: "Gearing Down",
     hint: "The same trade, backwards: one turn out for every five in — and read what happened to the torque.",
-    inventory: ["U2", "U2"],
+    inventory: ["U2", "U2", "U2", "U2"],
     drives: [{ pos: [-3, 0], rpm: 75, type: "U1", id: "motor" }],
     driven: [{ pos: [4, 0], type: "U5", ratio: { of: "motor", value: -0.2 } }],
     solution: [{ type: "U2", pos: [-1.5, 0] }, { type: "U2", pos: [0.5, 0] }],
@@ -826,7 +840,7 @@ const LEVELS = [
 
   { name: "Nothing In Between",
     hint: "Both wheels are the same size, so both must run at the same speed — same rate AND same direction.",
-    inventory: ["U2", "U2", "U2", "U2"],
+    inventory: ["U2", "U2", "U2", "U2", "U2", "U2"],
     drives: [{ pos: [-4, 0], rpm: 36, type: "U2" }],
     driven: [{ pos: [-4, -4], type: "U2", id: "a" },
              { pos: [2, 0], type: "U2", ratio: { of: "a", value: 1 } }],
@@ -836,7 +850,7 @@ const LEVELS = [
 
   { name: "Double Duty",
     hint: "Two motors, two targets, four gears. Split them.",
-    inventory: ["U2", "U2", "U2", "U2"],
+    inventory: ["U2", "U2", "U2", "U2", "U2", "U2"],
     drives: [{ pos: [-5, 3], rpm: 36, type: "U2" }, { pos: [-5, -3], rpm: 27, type: "U3" }],
     driven: [{ pos: [1, 3], type: "U2" }, { pos: [1, -3], type: "U1" }],
     solution: [{ type: "U2", pos: [-3, 3] }, { type: "U2", pos: [-1, 3] },
@@ -844,21 +858,21 @@ const LEVELS = [
 
   { name: "Shared Shaft",
     hint: "Drop a gear on another gear's CENTRE and they share a shaft. One turn out for every six in.",
-    inventory: ["U4", "U1"],
+    inventory: ["U4", "U1", "U2", "U2"],
     drives: [{ pos: [-3.5, 0], rpm: 36, type: "U2", id: "motor" }],
     driven: [{ pos: [1.5, 0], type: "U3", ratio: { of: "motor", value: 1 / 6 } }],
     solution: [{ type: "U4", pos: [-0.5, 0] }, { type: "U1", pos: [-0.5, 0], stack: 0 }] },
 
   { name: "Overdrive",
     hint: "A shaft runs both ways. Big into small, twice over: eight turns out for every one in.",
-    inventory: ["U1", "U2"],
+    inventory: ["U1", "U2", "U2", "U2"],
     drives: [{ pos: [-3, 0], rpm: 10, type: "U4", id: "motor" }],
     driven: [{ pos: [1, 0], type: "U1", ratio: { of: "motor", value: 8 } }],
     solution: [{ type: "U1", pos: [-0.5, 0] }, { type: "U2", pos: [-0.5, 0], stack: 0 }] },
 
   { name: "Two Stages",
     hint: "Stack a reduction on a reduction. Nothing but a shared shaft can multiply like this.",
-    inventory: ["U5", "U1", "U4", "U1"],
+    inventory: ["U5", "U1", "U4", "U1", "U2", "U2"],
     drives: [{ pos: [-4.5, 0], rpm: 36, type: "U2", id: "motor" }],
     driven: [{ pos: [3.5, 0], type: "U3", ratio: { of: "motor", value: -1 / 30 } }],
     solution: [{ type: "U5", pos: [-1, 0] }, { type: "U1", pos: [-1, 0], stack: 0 },
@@ -866,7 +880,7 @@ const LEVELS = [
 
   { name: "One In Sixty",
     hint: "Three stages, sixty to one. The first pinion rides the motor's own shaft.",
-    inventory: ["U1", "U4", "U1", "U3", "U1"],
+    inventory: ["U1", "U4", "U1", "U3", "U1", "U2", "U2"],
     drives: [{ pos: [-3.75, 0], rpm: 36, type: "U2", id: "in" }],
     driven: [{ pos: [3.75, 0], type: "U5", ratio: { of: "in", value: -1 / 60 } }],
     solution: [{ type: "U1", pos: [-3.75, 0], stack: "in" },
@@ -875,7 +889,7 @@ const LEVELS = [
 
   { name: "Wind the Barrel",
     hint: "A mainspring is a store, not a motor. Drive it and it fills — one full turn.",
-    inventory: ["U2", "U2"],
+    inventory: ["U2", "U2", "U2", "U2"],
     drives: [{ pos: [-3.5, 0], rpm: 60, type: "U2" }],
     driven: [{ pos: [3, 0], type: "SP", wind_turns: 1 }],
     solution: [{ type: "U2", pos: [-1.5, 0] }, { type: "U2", pos: [0.5, 0] }],
@@ -883,7 +897,7 @@ const LEVELS = [
 
   { name: "Two Barrels",
     hint: "One motor, two mainsprings. Branch the train and put a turn into each.",
-    inventory: ["U2", "U2", "U2"],
+    inventory: ["U2", "U2", "U2", "U2", "U2"],
     drives: [{ pos: [-6, 0], rpm: 60, type: "U2" }],
     driven: [{ pos: [-2, 2.5], type: "SP", wind_turns: 1 },
              { pos: [2.5, 0], type: "SP", wind_turns: 1 }],
@@ -892,7 +906,7 @@ const LEVELS = [
 
   { name: "First Hand",
     hint: "A wheel with a pointer on a dial is a hand. Bring this one down to about nine turns a minute.",
-    inventory: ["U3", "U1"],
+    inventory: ["U3", "U1", "U2", "U2"],
     drives: [{ pos: [-5, 0], rpm: -40, type: "U2" }],
     driven: [{ pos: [-0.5, 0], type: "U3", hand: "minute", dial: "MINUTES",
                min_rpm: 7, max_rpm: 10 }],
@@ -900,7 +914,7 @@ const LEVELS = [
 
   { name: "The Going Train",
     hint: "Sub-assembly one: bring the barrel down to a tenth of its speed.",
-    inventory: ["U2", "U4", "U1"],
+    inventory: ["U2", "U4", "U1", "U2", "U2"],
     drives: [{ pos: [-6, 0], rpm: 30, type: "U2", id: "barrel" }],
     driven: [{ pos: [2, 0], type: "U5", ratio: { of: "barrel", value: -0.1 } }],
     solution: [{ type: "U2", pos: [-4, 0] }, { type: "U4", pos: [-1, 0] },
@@ -908,7 +922,7 @@ const LEVELS = [
 
   { name: "Twelve To One",
     hint: "The motion work: a pinion into a four, then a pinion into a three. Exactly twelve to one.",
-    inventory: ["U1", "U4", "U1"],
+    inventory: ["U1", "U4", "U1", "U2", "U2"],
     drives: [{ pos: [-2.25, 0], rpm: 26, type: "U3", id: "in" }],
     driven: [{ pos: [2.25, 0], type: "U3", ratio: { of: "in", value: 1 / 12 } }],
     solution: [{ type: "U1", pos: [-2.25, 0], stack: "in" },
@@ -916,7 +930,7 @@ const LEVELS = [
 
   { name: "Barrel To Hand",
     hint: "Sub-assembly three: fifteen barrel turns, one sweep of the minute hand.",
-    inventory: ["U1", "U5", "U1"],
+    inventory: ["U1", "U5", "U1", "U2", "U2"],
     drives: [{ pos: [-3.4, -0.6], rpm: -34, type: "U2", id: "barrel" }],
     driven: [{ pos: [1.232, -0.419], type: "U3", hand: "minute", dial: "MINUTES",
                ratio: { of: "barrel", value: 1 / 15 } }],
@@ -926,7 +940,7 @@ const LEVELS = [
 
   { name: "The Dial Train",
     hint: "Sub-assembly two: the hour hand turns once for every twelve of the minute hand.",
-    inventory: ["U1", "U4", "U1"],
+    inventory: ["U1", "U4", "U1", "U2", "U2"],
     drives: [{ pos: [-2.25, 0.5], rpm: -26, type: "U3", id: "minute",
                hand: "minute", dial: "MINUTES" }],
     driven: [{ pos: [2.25, 0.5], type: "U3", hand: "hour", dial: "HOURS",
@@ -936,7 +950,7 @@ const LEVELS = [
 
   { name: "Gear Works",
     hint: "The clock. Barrel to minute hand, fifteen to one; minute hand to hour hand, twelve to one.",
-    inventory: ["U1", "U5", "U1", "U1", "U4", "U1"],
+    inventory: ["U1", "U5", "U1", "U1", "U4", "U1", "U2", "U2"],
     drives: [{ pos: [-5.266, 2.445], rpm: -34, type: "U2", id: "barrel" }],
     driven: [{ pos: [-1.7, -1], type: "U3", id: "minute",
                hand: "minute", dial: "MINUTES", ratio: { of: "barrel", value: 1 / 15 } },
@@ -1476,6 +1490,19 @@ class TileBase {
   contains(p) { return dist2(this.pos, p) <= this.hit_radius()**2; }
   inertia(rp_ref) { const s = rp_ref <= 1e-9 ? 1 : this.pitch_r()/rp_ref; return INERTIA_K*s*s; }
   friction_b(rp_ref) { const s = rp_ref <= 1e-9 ? 1 : Math.pow(this.pitch_r()/rp_ref, FRICTION_B_SCALE_R); return DAMPING.friction*s; }
+  // A ratio against the motor, as a ratio rather than a decimal: "1 : 12" is a
+  // sentence about a gear train, "0.083" is not. Direction is deliberately left to
+  // the rings and arrows, which cannot be misread the way a minus sign can.
+  ratio_text() {
+    const r = this.drive_ratio;
+    if (r === null || r === undefined || !Number.isFinite(r)) return "—";
+    const a = Math.abs(r);
+    if (a < 1e-6) return "0";
+    if (a >= 0.999 && a <= 1.001) return "1 : 1";
+    if (a > 1) return (a < 9.95 ? a.toFixed(1) : Math.round(a)) + " : 1";
+    const inv = 1 / a;
+    return "1 : " + (inv < 9.95 ? inv.toFixed(1) : Math.round(inv));
+  }
   // Text lines for this gear's floating readout (null = don't show one).
   readout_lines() {
     if (this.on_shaft_top === false && this.partner) return null;   // base of a stack: top shows it
@@ -1488,6 +1515,7 @@ class TileBase {
     // prints "-0". Below 10 rpm the reading carries a decimal instead.
     const rpm = (Math.abs(rpmV) < 0.05 ? "0"
                  : Math.abs(rpmV) < 9.95 ? rpmV.toFixed(1) : rpmV.toFixed(0)) + " rpm";
+    if (this.readout_mode === "ratio") return [this.ratio_text(), rpm];
     return [rpm, fmt_torque(this.torque)];
   }
   // Screen-up radius: how far above the centre the gear body reaches.
@@ -1788,6 +1816,7 @@ class Game {
     this.dragging = false; this.drag_tile = null;
     this.touch_start = [0, 0]; this.paused = false; this.selected_driver = null;
     this.mesh_edges = []; this._graph = new Map(); this._topology_dirty = true;
+    this.readout_mode = "ratio";
     this._flashes = []; this._meshSeen = null;
     this.zoom = 1; this.camPanX = 0; this.camPanY = 0;   // view camera
     this._recompute_geometry();
@@ -1833,7 +1862,7 @@ class Game {
     // anything that asks the menu what is on the bench.
     this.tile_list = []; this.links = []; this.mesh_edges = [];
     this.dragging = false; this.drag_tile = null; this.selected_driver = null;
-    this.paused = false; this.win = false; this._win_at = null; this._mark_dirty();
+    this.paused = false; this.win = false; this._win_at = null; this._stars = 0; this._mark_dirty();
   }
   _main_menu_items() {
     const items = [["Free Play", "free"]];
@@ -1846,13 +1875,18 @@ class Game {
     return rest;
   }
   enter_main_menu() { this.mode = "menu"; this._reset_camera(); this._clear_board(); }
+  cycle_readouts() {
+    const i = READOUT_MODES.indexOf(this.readout_mode);
+    this.readout_mode = READOUT_MODES[(i + 1) % READOUT_MODES.length];
+  }
   start_free_play() {
     this.mode = "free"; this._reset_camera(); this._clear_board();
+    this.readout_mode = "speed";       // the bench is where torque matters
     this.menu.set_buttons([
       ["Add U1","add_tri"],["Add U2","add_u2"],["Add U3","add_u3"],
       ["Add U4","add_u4"],["Add U5","add_u5"],["Spring","add_sp"],
       ["Rack","add_rack"],["Link","add_link"],["Ring","add_ring"],
-      ["Wind Up","wind_up"],["Damp: Normal","damp"],
+      ["Wind Up","wind_up"],["Damp: Normal","damp"],["Readouts","readout"],
       ["Speed -","spd_dn"],["Speed +","spd_up"],["Pause","pause"],["Menu","to_menu"]]);
     this._sync_damp_label();
     this.menu.layout(this.W, this.H);
@@ -1909,6 +1943,7 @@ class Game {
   }
   start_level(idx) {
     this.mode = "puzzle"; this._reset_camera();
+    this.readout_mode = "ratio";       // every goal in the campaign is a ratio
     DAMP_MODE = 0; DAMPING = DAMP_PRESETS[0];   // puzzles always use the tuned feel
     this.level_idx = Math.max(0, Math.min(idx, LEVELS.length - 1));
     this._clear_board();
@@ -1928,13 +1963,37 @@ class Game {
 
     this._drop_inventory(lv.inventory || []);   // stage the player's gears
 
-    this.menu.set_buttons([["Restart", "restart"], ["Menu", "to_menu"]]);
+    this.menu.set_buttons([["Readouts", "readout"], ["Restart", "restart"], ["Menu", "to_menu"]]);
     this.menu.layout(this.W, this.H);
     this._win_at = null;
     this._mark_dirty(); this._ensure_rebuilt();
     this._frame_level();
   }
   _placed_count() { let n = 0; for (const t of this.tile_list) if (!t.anchored) n++; return n; }
+  // --- scoring -------------------------------------------------------------
+  // Every level ships more parts than its answer needs, and the score is about
+  // economy: what did you actually put to work? A part counts when it is placed
+  // AND connected to a motor — a spare left in the tray, or dropped somewhere
+  // idle, is not part of the machine. `drive_ratio` is stamped by the solver, so
+  // this is the solver's own answer to "is this thing in the train".
+  parts_used() {
+    let n = 0;
+    for (const t of this.tile_list) if (!t.anchored && t.drive_ratio != null) n++;
+    return n;
+  }
+  par() { return (LEVELS[this.level_idx].solution || []).length; }
+  stars() {
+    const used = this.parts_used(), par = this.par();
+    return used <= par ? 3 : used === par + 1 ? 2 : 1;
+  }
+  // Re-scored while the level stays solved, so a player who finds a cheaper build
+  // after the sheet appears keeps the better result. It never goes down: pulling
+  // the machine apart afterwards cannot cost you the stars you earned.
+  _rescore() {
+    const driven = this.tile_list.filter(t => t.role === "driven");
+    if (!driven.length || !driven.every(t => this.target_ok(t))) return;
+    this._stars = Math.max(this._stars || 0, this.stars());
+  }
   // Is one target's goal met? Every level's win condition goes through here, and
   // every clause reads a value the ratio solver produced — nothing is special-cased
   // and nothing is read out of the draw path.
@@ -1978,6 +2037,7 @@ class Game {
     if (driven.length && driven.every(t => this.target_ok(t))) {
       this.win = true;
       this._win_at = this.anim;
+      this._stars = this.stars();
       this._frame_solved();
     }
   }
@@ -2617,6 +2677,7 @@ class Game {
   }
   _apply_drive_dynamics(dt) {
     const graph = this._graph; const nodes = [...graph.keys()];
+    for (const t of this.tile_list) t.drive_ratio = null;   // anything off the graph is off the train
     for (const t of nodes) t.locked = false;
     const gain = DRIVE_SERVO_GAIN; const visited = new Set();
     for (const start of nodes) {
@@ -2627,7 +2688,7 @@ class Game {
       // would rescale the baseline damping and change the train's behaviour.
       const ref = [...comp].find(t => !t.is_rack()) || start;
       const [ratios, ok] = this._solve_component_ratios(graph, ref);
-      if (!ok || ratios.size !== comp.size) { for (const t of comp) { t.omega = 0; t.torque = 0; t.locked = true; } continue; }
+      if (!ok || ratios.size !== comp.size) { for (const t of comp) { t.omega = 0; t.torque = 0; t.locked = true; t.drive_ratio = null; } continue; }
       const drivers = [...comp].filter(t => t.is_driver);
       const springs = [...comp].filter(t => t.is_spring());
       // With no motor and no wound spring the train freewheels: it keeps its speed
@@ -2636,7 +2697,7 @@ class Game {
       let I_eff = 0, B_eff = DAMPING.viscous;
       for (const t of comp) { const k = ratios.get(t); I_eff += t.inertia(this.Rp2)*k*k; B_eff += t.friction_b(this.Rp2)*k*k; }
       if (freewheel) B_eff += DAMPING.coast;   // extra drag that sets the coast-down time
-      if (I_eff <= 1e-9) { for (const t of comp) { t.omega = 0; t.torque = 0; } continue; }
+      if (I_eff <= 1e-9) { for (const t of comp) { t.omega = 0; t.torque = 0; t.drive_ratio = null; } continue; }
       let T_drive = 0, B_motor = 0;
       for (const d of drivers) { const kd = ratios.get(d); T_drive += gain*kd*d.drive_speed; B_motor += gain*kd*kd; }
       // Spring torque, reflected to the reference gear:
@@ -2685,8 +2746,14 @@ class Game {
       // ones less — the speed/torque trade-off of a gear train.
       const alpha_actual = (omega_ref - omega_before) / dt;
       const tau_ref = I_eff * alpha_actual + B_eff * omega_ref;
+      // Ratio to the motor, straight out of the solve. Geometry fixes it, so it is
+      // right on the first frame while the rpm numbers are still settling — which
+      // is exactly why a player cannot read ratios off the rpm numbers.
+      const d0 = drivers[0], kd = d0 ? ratios.get(d0) : 0;
+      const known = d0 && Math.abs(kd) > 1e-9;
       for (const t of comp) {
         const k = ratios.get(t);
+        t.drive_ratio = known ? k / kd : null;
         t.omega = k * omega_ref; t.locked = false;
         const raw = Math.abs(k) > 1e-9 ? tau_ref / k : 0;
         t.torque = t.torque * 0.82 + raw * 0.18;   // light smoothing so the readout is steady
@@ -2723,6 +2790,7 @@ class Game {
     // merely HOVERING over its final position could latch a win off the leftover
     // spin — and then drop wherever the player actually released it.
     if (this.mode === "puzzle" && !this.win && !this.dragging) this._check_win();
+    else if (this.mode === "puzzle" && this.win && !this.dragging) this._rescore();
   }
 
   // ---- linkages (kinematic crank-slider) ----
@@ -3111,6 +3179,7 @@ class Game {
   // and the whole thing is clamped to the visible band so nothing hides under the
   // top bar. Text never lands on metal; that is what the stem is for.
   _draw_readouts() {
+    if (this.readout_mode === "off") { _roPlaced.length = 0; return; }
     // A part still sitting in the staging row is not part of any train yet, so it
     // has no reading to give. Twenty pills reading "0 rpm / 0 N·m" around the edge
     // of the board is noise that hides the ones that matter.
@@ -3129,6 +3198,7 @@ class Game {
     } else {
       for (const t of this.tile_list) t.staged = false;
     }
+    for (const t of this.tile_list) t.readout_mode = this.readout_mode;
     const items = _roBuf; items.length = 0;
     // Labels are instrument type: they shrink with the bench so a 390px screen
     // does not end up with pills bigger than the gears they annotate.
@@ -3317,6 +3387,7 @@ class Game {
     else if (mid === "spd_up") this._adjust_selected_speed(SPEED_STEP_RPM);
     else if (mid === "spd_dn") this._adjust_selected_speed(-SPEED_STEP_RPM);
     else if (mid === "pause") { this.paused = !this.paused; this._sync_pause_label(); }
+    else if (mid === "readout") this.cycle_readouts();
     else if (mid === "damp") {
       DAMP_MODE = (DAMP_MODE + 1) % DAMP_PRESETS.length;
       DAMPING = DAMP_PRESETS[DAMP_MODE];
@@ -3429,6 +3500,10 @@ const ICO = (() => {
     u4: gear(16, 10.6, 8.0, 2.6),
     u5: gear(19, 11.2, 8.6, 2.8),
     sp: gear(12, 11, 8.6, 0.1).replace("</path>", "</path>") + spiral(2.4, 1.6, 7),
+    star: '<path d="M12 3.2 14.7 9l6.3.8-4.6 4.3 1.2 6.2L12 17.4 6.4 20.3l1.2-6.2L3 9.8 9.3 9Z"' +
+          ' fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>',
+    gauge: stroke("M4 17a8 8 0 0 1 16 0") + stroke("M12 17 16.5 11.5") +
+          '<circle cx="12" cy="17" r="1.6" fill="currentColor"/>',
     rack: '<path d="M2.5 13h19v5.5h-19z" fill="currentColor"/>' +
           stroke("M5 13V9.5M9 13V9.5M13 13V9.5M17 13V9.5M21 13V9.5", 1.6),
     ring: gear(18, 11.2, 9.2, 0.1) +
@@ -3570,11 +3645,13 @@ const CHROME = {
     const lv = LEVELS[game.level_idx];
     this.set(this.el.winSub, "Level " + (game.level_idx + 1) + " — " + lv.name);
     // what the player actually built — a small, honest result readout
-    const seated = game.tile_list.filter((t) =>
-      !t.anchored && (t.partner || game.mesh_edges.some(([a, b]) => a === t || b === t))).length;
+    const stars = game._stars || 1, par = game.par(), used = game.parts_used();
     this.el.winStats.innerHTML =
-      '<div class="meter"><span class="k">Parts</span><span class="v">' + seated + "</span></div>" +
-      '<div class="meter"><span class="k">Mesh</span><span class="v cyan">' + game.mesh_edges.length + "</span></div>";
+      '<div class="stars" aria-label="' + stars + ' of 3 stars">' +
+      [1, 2, 3].map((n) => this.svg("star", "st" + (n <= stars ? " on" : ""))).join("") +
+      "</div>" +
+      '<div class="meter"><span class="k">Parts used</span><span class="v">' +
+      used + " / " + par + "</span></div>";
     const acts = this.el.winActs;
     acts.innerHTML = "";
     for (const [label, id] of game._win_items()) {
@@ -3699,6 +3776,12 @@ const CHROME = {
         this.el.r.damp = b.querySelector(".val");
         bench.appendChild(b);
       }
+      if (has("readout")) {
+        const b = this.btn("readout", "Readouts", "gauge", "", () => game._handle_menu("readout"));
+        b.innerHTML = this.svg("gauge") + '<span class="lbl">Readouts</span><span class="val"></span>';
+        this.el.r.readout = b.querySelector(".val");
+        bench.appendChild(b);
+      }
       if (has("pause")) {
         const b = this.btn("pause", "Pause", "pause", "", () => game._handle_menu("pause"));
         this.el.r.pause = b;
@@ -3733,6 +3816,12 @@ const CHROME = {
         this.el.r.goals.push({ el: g, tile: t });
       });
       lvg.appendChild(brief);
+      if (has("readout")) {
+        const b = this.btn("readout", "Readouts", "gauge", "", () => game._handle_menu("readout"));
+        b.innerHTML = this.svg("gauge") + '<span class="lbl">Readouts</span><span class="val"></span>';
+        this.el.r.readout = b.querySelector(".val");
+        lvg.appendChild(b);
+      }
       if (has("restart")) lvg.appendChild(this.btn("restart", "Restart", "restart", "", () => game._handle_menu("restart")));
       rail.appendChild(lvg);
     }
@@ -3746,7 +3835,7 @@ const CHROME = {
         '<span class="t">Scrap</span><span class="s">Drag a part here to scrap it</span>';
     } else {
       tray.className = "count";
-      tray.innerHTML = '<span class="t">Seated</span><span class="s"></span>';
+      tray.innerHTML = '<span class="t">Parts used</span><span class="s"></span>';
     }
     this.el.tray = tray;
     this.el.trayS = tray.querySelector(".s");
@@ -3793,13 +3882,17 @@ const CHROME = {
       else m.targets.style.color = "";
       this.set(m.mesh, String(game.mesh_edges.length));
       this.set(m.zoom, game.zoom.toFixed(2) + "×");
-      const left = game.tile_list.filter((t) => !t.anchored).length;
-      const seated = game.tile_list.filter((t) => !t.anchored && game.mesh_edges.some(([a, b]) => a === t || b === t)).length;
-      if (this.el.trayS) this.set(this.el.trayS, seated + " / " + left);
+      // Against par, not against the tray: the tray holds spares, and "3 / 5" would
+      // read as an instruction to use all five.
+      if (this.el.trayS) {
+        this.set(this.el.trayS, game.parts_used() + " / " + game.par());
+        this.el.trayS.classList.toggle("over", game.parts_used() > game.par());
+      }
       if (this.el.r && this.el.r.targets) {
         this.set(this.el.r.targets, on + " / " + driven.length);
         this.el.r.targets.classList.toggle("done", !!driven.length && on === driven.length);
       }
+      if (this.el.r && this.el.r.readout) this.set(this.el.r.readout, READOUT_LABEL[game.readout_mode]);
       if (this.el.r && this.el.r.goals) {
         for (const g of this.el.r.goals) g.el.classList.toggle("done", game.target_ok(g.tile));
       }
@@ -3826,6 +3919,7 @@ const CHROME = {
           r.rpm.classList.add("flash");
         }
       }
+      if (r.readout) this.set(r.readout, READOUT_LABEL[game.readout_mode]);
       if (r.damp) {
         this.set(r.damp, DAMPING.short);
         const b = r.damp.parentElement;

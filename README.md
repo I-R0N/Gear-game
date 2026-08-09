@@ -11,6 +11,11 @@ and the rules every level is held to are in [`LEVELS.md`](LEVELS.md); why the fi
 built the way it is — including the measurements that ruled out a spring-powered clock and
 a real escapement — is in [`CLOCK.md`](CLOCK.md).
 
+Every level ships more parts than its answer needs and scores out of three stars on how
+few you use. The floating readouts show each wheel's **ratio to the motor**, taken out of
+the ratio solve rather than inferred from the rpm, so they are exact before the train has
+finished settling; a rail button cycles them between Ratio, Speed and Off.
+
 **▶ [Play the current build](https://i-r0n.github.io/Gear-game/)**
 
 No build step and no runtime dependencies: open `gear_works.html` in a browser, or serve
