@@ -19,9 +19,13 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
 
-# Every job pushes to the same branch, so they must not interleave.
+# Per target, not global: a rapid re-push on one pull request supersedes its own
+# pending run, but two pull requests never cancel each other. GitHub keeps only
+# one pending run per group, so a single shared group would silently drop a
+# preview whenever two branches moved at once. Concurrent pushes to gh-pages are
+# handled by the retry loop in the publish step instead.
 concurrency:
-  group: preview-pages
+  group: preview-${{ github.event.number || github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -116,42 +120,65 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Attach the published site as a worktree, creating it on first run.
-          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
-            git fetch --no-tags origin gh-pages
-            git worktree add site origin/gh-pages
-            git -C site checkout -B gh-pages
-          else
-            git worktree add --detach site
-            git -C site checkout --orphan gh-pages
-            git -C site rm -rf . >/dev/null 2>&1 || true
-          fi
+          # Different pull requests publish in parallel and all push the same
+          # branch, so a push can lose a race. Each target owns its own
+          # directory, so re-applying onto the newer tip is always conflict
+          # free — rebuild the worktree from the latest gh-pages and retry.
+          for attempt in 1 2 3 4 5; do
+            rm -rf site
+            git worktree prune
+            # A previous attempt leaves a local gh-pages branch behind, which
+            # would make the orphan checkout below fail on the retry.
+            git branch -D gh-pages >/dev/null 2>&1 || true
 
-          if [ "$CLOSED" = "true" ]; then
-            # Only ever delete a pr/N directory — never the published main site.
-            case "$DIR" in
-              pr/[0-9]*) rm -rf "site/$DIR" ;;
-              *) echo "refusing to remove '$DIR'"; exit 1 ;;
-            esac
-            MSG="preview: remove $DIR (pull request closed)"
-          else
-            mkdir -p "site/$DIR"
-            # The game is one self-contained file; index.html makes the URL clean.
-            cp gear_works.html "site/$DIR/index.html"
-            cp gear_works.html "site/$DIR/gear_works.html"
-            MSG="preview: publish $DIR from ${GITHUB_SHA::7}"
-          fi
+            if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+              git fetch --no-tags --force origin gh-pages
+              git worktree add site FETCH_HEAD
+              git -C site checkout -B gh-pages
+            else
+              git worktree add --detach site
+              git -C site checkout --orphan gh-pages
+              git -C site rm -rf . >/dev/null 2>&1 || true
+            fi
 
-          touch site/.nojekyll   # serve files verbatim, no Jekyll pass
+            if [ "$CLOSED" = "true" ]; then
+              # Only ever delete a pr/N directory — never the published main site.
+              case "$DIR" in
+                pr/[0-9]*) rm -rf "site/$DIR" ;;
+                *) echo "refusing to remove: $DIR"; exit 1 ;;
+              esac
+              MSG="preview: remove $DIR (pull request closed)"
+            else
+              mkdir -p "site/$DIR"
+              # The game is one self-contained file; index.html makes the URL clean.
+              cp gear_works.html "site/$DIR/index.html"
+              cp gear_works.html "site/$DIR/gear_works.html"
+              MSG="preview: publish $DIR from ${GITHUB_SHA::7}"
+            fi
 
-          cd site
-          git add -A
-          if git diff --cached --quiet; then
-            echo "site unchanged, nothing to push"
-          else
+            touch site/.nojekyll   # serve files verbatim, no Jekyll pass
+
+            cd site
+            git add -A
+            if git diff --cached --quiet; then
+              echo "site unchanged, nothing to push"
+              cd ..
+              break
+            fi
             git commit -m "$MSG"
-            git push origin HEAD:gh-pages
-          fi
+            if git push origin HEAD:gh-pages; then
+              cd ..
+              echo "published on attempt $attempt"
+              break
+            fi
+            cd ..
+            if [ "$attempt" = "5" ]; then
+              echo "gh-pages push kept losing the race after $attempt attempts"
+              exit 1
+            fi
+            echo "push rejected (concurrent deploy), retrying"
+            sleep $((attempt * 3))
+          done
 
       - name: Comment the preview link on the pull request
         if: github.event_name == 'pull_request' && github.event.action != 'closed'
