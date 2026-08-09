@@ -200,6 +200,15 @@ body[data-mode="menu"] #topbar button{pointer-events:none}
 #brief .row .v{font-family:var(--mono);font-size:var(--fs-body-sm);font-weight:600;
   color:var(--cyan-hi);font-variant-numeric:tabular-nums}
 #brief .row .v.done{color:var(--green)}
+/* one row per target, carrying that target's own goal in plain words */
+#brief .goals{display:flex;flex-direction:column;gap:5px}
+#brief .goal{display:flex;align-items:center;gap:7px;font-family:var(--mono);
+  font-size:var(--fs-micro);letter-spacing:.06em;color:var(--ink-3)}
+#brief .goal .dot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;
+  border:1px solid var(--ink-4);background:transparent;
+  transition:background var(--d-2) var(--ease-out),border-color var(--d-2) var(--ease-out)}
+#brief .goal.done{color:var(--green)}
+#brief .goal.done .dot{background:var(--green);border-color:var(--green)}
 
 /* parts-tray tile: icon over a micro caption */
 .tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
@@ -284,7 +293,10 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
 #title h1 span{color:var(--ink-3);font-weight:400}
 #title .tagline{margin:0;font-size:var(--fs-body-sm);color:var(--ink-3);max-width:34ch}
 #title .rule{height:1px;background:linear-gradient(90deg,transparent,var(--edge) 20%,var(--edge) 80%,transparent)}
-#title .list{display:flex;flex-direction:column;overflow:hidden;padding:0}
+#title .list{display:flex;flex-direction:column;overflow:hidden;padding:0;
+  /* twenty levels plus free play: the list scrolls inside itself so the brand and
+     the first rows stay put instead of pushing the page into a long scroll */
+  max-height:min(48vh,430px);overflow-y:auto;scrollbar-width:thin}
 #title .list .btn{border:0;border-radius:0;box-shadow:none;background:transparent}
 #title .list .btn + .btn{border-top:1px solid var(--edge)}
 #title .list .btn:hover{background:linear-gradient(180deg,rgba(67,82,110,.22),rgba(67,82,110,.10))}
@@ -313,17 +325,30 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
 .level-row:hover .go{color:var(--amber);transform:translateX(3px)}
 .level-row.wide{min-height:56px}
 
-#winscreen{background:radial-gradient(120% 80% at 50% 50%,rgba(6,8,11,.42),rgba(6,8,11,.80));
-  backdrop-filter:blur(2px)}
-#winscreen .card{padding:var(--sp-6) var(--sp-5) var(--sp-5);display:flex;flex-direction:column;
-  align-items:center;gap:var(--sp-3);text-align:center;border-radius:var(--r-4);box-shadow:var(--e-3),var(--e-1)}
-#winscreen .seal{width:60px;height:60px;color:var(--green);filter:drop-shadow(0 4px 16px rgba(75,227,155,.3))}
-#winscreen h2{margin:0;font-size:var(--fs-title);font-weight:700;letter-spacing:.02em;color:var(--ink)}
-#winscreen .lv{font-size:var(--fs-body-sm);color:var(--ink-3)}
-#winscreen .stats{display:flex;gap:var(--sp-5);margin-top:var(--sp-1)}
-#winscreen .stats .meter{align-items:center}
-#winscreen .stats .v{font-size:var(--fs-subhead);font-weight:600}
-#winscreen .acts{display:flex;flex-direction:column;gap:var(--sp-2);width:100%;margin-top:var(--sp-2)}
+/* The completion sheet docks at the bottom of the play area instead of covering
+   it. The scrim is a low gradient under the sheet only — enough to seat it, not
+   enough to dim the machine the player just built. */
+#winscreen{align-items:flex-end;justify-content:stretch;padding:0;overflow:visible;
+  background:linear-gradient(180deg,rgba(6,8,11,0) 58%,rgba(6,8,11,.30) 82%,rgba(6,8,11,.62) 100%);
+  pointer-events:none}
+#winscreen .stack{width:auto;position:absolute;left:calc(var(--rail-w) + var(--sp-5));
+  right:var(--sp-3);bottom:var(--sp-3);gap:0}
+#winscreen .card{pointer-events:auto;display:flex;align-items:center;gap:var(--sp-4);
+  padding:var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);border-radius:var(--r-3);
+  box-shadow:var(--e-3),var(--e-1);border-color:rgba(75,227,155,.34)}
+#winscreen .card::before{content:"";position:absolute;inset:0 0 auto 0;height:1px;
+  border-radius:var(--r-3) var(--r-3) 0 0;
+  background:linear-gradient(90deg,transparent,rgba(75,227,155,.55),transparent)}
+#winscreen .seal{flex:0 0 auto;width:34px;height:34px;color:var(--green);
+  filter:drop-shadow(0 4px 16px rgba(75,227,155,.3))}
+#winscreen .head{display:flex;flex-direction:column;gap:2px;min-width:0}
+#winscreen h2{margin:0;font-size:var(--fs-label);font-weight:600;letter-spacing:.10em;
+  text-transform:uppercase;color:var(--green)}
+#winscreen .lv{font-size:var(--fs-body);font-weight:600;color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#winscreen .stats{display:flex;gap:var(--sp-5);margin-left:auto}
+#winscreen .stats .v{font-size:var(--fs-body);font-weight:600}
+#winscreen .acts{display:flex;gap:var(--sp-2);flex:0 0 auto}
 #winscreen .acts .btn{min-height:44px;justify-content:center}
 #winscreen .acts .btn .lbl{flex:0 1 auto;text-align:center}
 
@@ -362,6 +387,12 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
   #title h1{font-size:var(--fs-display-sm)}
   #title .mark{width:46px;height:46px}
   .screen{padding:var(--sp-4) var(--sp-3)}
+  #winscreen{padding:0}
+  #winscreen .stack{left:var(--sp-2);right:var(--sp-2);bottom:calc(var(--sp-2) + 76px)}
+  #winscreen .card{flex-wrap:wrap;gap:var(--sp-2) var(--sp-3);padding:var(--sp-3)}
+  #winscreen .stats{margin-left:auto;order:2}
+  #winscreen .acts{order:3;flex:1 1 100%}
+  #winscreen .acts .btn{flex:1 1 0;min-height:48px}
 }
 @media (max-width:760px) and (max-height:560px){
   #hintbar{display:none}
@@ -396,6 +427,10 @@ body[data-mode="puzzle"] #rail .group,body[data-mode="puzzle"] #rail #tray,body[
 #winscreen.on .acts .btn:nth-child(1){animation:riseIn 380ms var(--ease-out) 120ms both}
 #winscreen.on .acts .btn:nth-child(2){animation:riseIn 380ms var(--ease-out) 190ms both}
 @keyframes riseIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+/* the sheet seats upward from the bottom edge, like a drawer, not a fading card */
+#winscreen .stack > *{transform:translateY(20px)}
+/* the hint strip steps out of the way rather than being covered by the sheet */
+body[data-win="1"] #hintbar{opacity:0;transform:translateY(6px)}
 
 body[data-paused="1"] #topbar{border-color:rgba(255,176,32,.38);
   box-shadow:var(--e-1),inset 3px 0 0 var(--amber)}
@@ -441,12 +476,16 @@ body[data-paused="1"] #topbar{border-color:rgba(255,176,32,.38);
     </div>
   </section>
 
+  <!-- Level complete. Deliberately NOT a centred card: the finished mechanism is
+       the reward, so this is a sheet that docks under it and never covers it. -->
   <section id="winscreen" class="screen" aria-label="Level complete">
     <div class="stack">
       <div class="panel card">
         <svg class="seal" viewBox="0 0 48 48" aria-hidden="true"><g id="winseal"></g></svg>
-        <h2>LEVEL COMPLETE</h2>
-        <div class="lv" id="win-sub"></div>
+        <div class="head">
+          <h2>LEVEL COMPLETE</h2>
+          <div class="lv" id="win-sub"></div>
+        </div>
         <div class="stats" id="win-stats"></div>
         <div class="acts" id="win-acts"></div>
       </div>
@@ -681,40 +720,215 @@ const HEX_MULT  = { U2: 1.0, U3: 1.5, U4: 2.0, U5: 2.5, SP: 1.5 };
 // ============================================================
 const GAME_TITLE = "GEAR WORKS";
 const WIN_SPIN_EPS = 1e-2;
+// Seconds of simulation between solving a level and any UI appearing over it.
+const WIN_REVEAL_DELAY = 0.85;
 
-// Level schema (free-position / pitch-snap world):
-//   drives/driven: [{ pos:[x,y], ... }]  positions in units of Rp2 (the U2 pitch
-//     radius) from the arena centre. Gaps are chosen so a straight tangent chain of
-//     the inventory exactly bridges drive -> target.
-//   inventory: [type...]  gears dropped into the arena for the player to snap in.
-//   Win = every driven gear turning.
-//   Tangent gaps (centre-to-centre, in Rp2): U2-U2 = 2, U3-U2 = 2.5, U2-U1 = 1.5.
+// The authoring box for level content, in units of Rp2 from the arena centre.
+// Derived in CLOCK.md from _recompute_geometry plus the measured chrome rects at
+// BOTH 1280x800 and 390x844, intersected: mobile sets the horizontal limit and
+// desktop sets both vertical ones. scripts/test.mjs re-derives it live at both
+// viewports every run and asserts every part of every level fits inside it, so a
+// level that only fits on desktop fails the suite rather than shipping.
+const LEVEL_BOX = { x: 10.6, top: 9.5, bottom: -10.0 };
+const STAGE_GAP = 0.42;          // clear space between staged inventory parts
+
+// Level schema (free-position / pitch-snap world). All positions are in units of
+// Rp2 (the U2 pitch radius) from the arena centre; two parts mesh when their
+// centres are (sum of pitch radii) apart, and in these units the pitch radii are
+//     U1 0.5 · U2 1.0 · U3 1.5 · U4 2.0 · U5 2.5 · SP 1.5
+// so U2-U2 = 2.0, U3-U2 = 2.5, U2-U1 = 1.5, U1-U4 = 2.5, and so on.
+//
+//   drives:  [{ pos, type, rpm, id?, hand?, dial? }]      anchored motors
+//   driven:  [{ pos, type, id?, hand?, dial?, ...goal }]  anchored targets
+//   inventory: [type...]                                  the player's parts
+//   solution:  [{ type, pos, stack? }]                    the machine-checkable
+//              answer: `stack` is the 0-based index of an earlier solution entry,
+//              or a drive/driven `id`, whose shaft this part rides on.
+//   naive_solves: true on the levels where blindly chaining the inventory off the
+//              drive IS the intended answer (the tutorial working as designed).
+//
+// A target's goal defaults to "is turning". It may add, and must then satisfy:
+//   spin: +1 | -1     required sign of omega  (+1 = counter-clockwise on screen)
+//   min_rpm / max_rpm bounds on |rpm|
+//   wind_turns: n     spring only — wind it to at least n turns
+//   ratio: { of: id, value, tol }   signed omega ratio against another anchor.
+//              Exact by construction: the ratio graph fixes it from geometry
+//              alone, so this never drifts with speed or damping (see CLOCK.md).
 const LEVELS = [
-  { name: "First Link",
-    hint: "Drag the gear so it meshes the drive and the target.",
+  { name: "First Mesh",
+    hint: "Drag the gear between the two so all three teeth-sets touch.",
     inventory: ["U2"],
     drives: [{ pos: [-2, 0], rpm: 120, type: "U2" }],
-    driven: [{ pos: [2, 0], type: "U2" }] },
+    driven: [{ pos: [2, 0], type: "U2" }],
+    solution: [{ type: "U2", pos: [0, 0] }],
+    naive_solves: true },
+
   { name: "Straight Run",
-    hint: "Snap the 3 gears into a chain across the gap.",
+    hint: "One gear cannot bridge this. Three in a row can.",
     inventory: ["U2", "U2", "U2"],
     drives: [{ pos: [-4, 0], rpm: 120, type: "U2" }],
-    driven: [{ pos: [4, 0], type: "U2" }] },
-  { name: "Double Duty",
-    hint: "Two drives, two targets. Bridge both — two gears each.",
+    driven: [{ pos: [4, 0], type: "U2" }],
+    solution: [{ type: "U2", pos: [-2, 0] }, { type: "U2", pos: [0, 0] },
+               { type: "U2", pos: [2, 0] }],
+    naive_solves: true },
+
+  { name: "Turn It Around",
+    hint: "Every mesh reverses the spin. The target must turn the motor's way — count the meshes, not the gears.",
+    inventory: ["U2", "U2", "U2"],
+    drives: [{ pos: [-4, 0], rpm: 120, type: "U2" }],
+    driven: [{ pos: [2, 0], type: "U2", spin: 1 }],
+    solution: [{ type: "U2", pos: [-3, 1.7320508] }, { type: "U2", pos: [-1, 1.7320508] },
+               { type: "U2", pos: [1, 1.7320508] }] },
+
+  { name: "Split the Power",
+    hint: "One gear can drive two. Find the hub, then branch.",
+    inventory: ["U2", "U2", "U2"],
+    drives: [{ pos: [-3, 0], rpm: 120, type: "U2" }],
+    driven: [{ pos: [1, 2.6], type: "U2" }, { pos: [1, -2.6], type: "U2" }],
+    solution: [{ type: "U2", pos: [-1, 0] },
+               { type: "U2", pos: [-0.90723, 1.99784] },
+               { type: "U2", pos: [-0.90723, -1.99784] }] },
+
+  { name: "Gearing Up",
+    hint: "A big wheel driving a small one buys speed with torque. Five turns out for every one in.",
+    inventory: ["U2", "U2"],
+    drives: [{ pos: [-4, 0], rpm: 48, type: "U5", id: "motor" }],
+    driven: [{ pos: [3, 0], type: "U1", ratio: { of: "motor", value: -5 } }],
+    solution: [{ type: "U2", pos: [-0.5, 0] }, { type: "U2", pos: [1.5, 0] }],
+    naive_solves: true },
+
+  { name: "Gearing Down",
+    hint: "The same trade, backwards: one turn out for every five in — and read what happened to the torque.",
+    inventory: ["U2", "U2"],
+    drives: [{ pos: [-3, 0], rpm: 240, type: "U1", id: "motor" }],
+    driven: [{ pos: [4, 0], type: "U5", ratio: { of: "motor", value: -0.2 } }],
+    solution: [{ type: "U2", pos: [-1.5, 0] }, { type: "U2", pos: [0.5, 0] }],
+    naive_solves: true },
+
+  { name: "Nothing In Between",
+    hint: "Both wheels are the same size, so both must run at the same speed — same rate AND same direction.",
     inventory: ["U2", "U2", "U2", "U2"],
-    drives: [{ pos: [-3, 3.2], rpm: 120, type: "U2" }, { pos: [-3, -3.2], rpm: 150, type: "U2" }],
-    driven: [{ pos: [3, 3.2], type: "U2" }, { pos: [3, -3.2], type: "U2" }] },
-  { name: "Big & Small",
-    hint: "A big drive spins a small target faster. Chain across with the two gears.",
+    drives: [{ pos: [-4, 0], rpm: 120, type: "U2" }],
+    driven: [{ pos: [-4, -4], type: "U2", id: "a" },
+             { pos: [2, 0], type: "U2", ratio: { of: "a", value: 1 } }],
+    solution: [{ type: "U2", pos: [-4, -2] },
+               { type: "U2", pos: [-3, 1.7320508] }, { type: "U2", pos: [-1, 1.7320508] },
+               { type: "U2", pos: [1, 1.7320508] }] },
+
+  { name: "Double Duty",
+    hint: "Two motors, two targets, four gears. Split them.",
+    inventory: ["U2", "U2", "U2", "U2"],
+    drives: [{ pos: [-5, 3], rpm: 120, type: "U2" }, { pos: [-5, -3], rpm: 90, type: "U3" }],
+    driven: [{ pos: [1, 3], type: "U2" }, { pos: [1, -3], type: "U1" }],
+    solution: [{ type: "U2", pos: [-3, 3] }, { type: "U2", pos: [-1, 3] },
+               { type: "U2", pos: [-2.5, -3] }, { type: "U2", pos: [-0.5, -3] }] },
+
+  { name: "Shared Shaft",
+    hint: "Drop a gear on another gear's CENTRE and they share a shaft. One turn out for every six in.",
+    inventory: ["U4", "U1"],
+    drives: [{ pos: [-3.5, 0], rpm: 120, type: "U2", id: "motor" }],
+    driven: [{ pos: [1.5, 0], type: "U3", ratio: { of: "motor", value: 1 / 6 } }],
+    solution: [{ type: "U4", pos: [-0.5, 0] }, { type: "U1", pos: [-0.5, 0], stack: 0 }] },
+
+  { name: "Overdrive",
+    hint: "A shaft runs both ways. Big into small, twice over: eight turns out for every one in.",
+    inventory: ["U1", "U2"],
+    drives: [{ pos: [-3, 0], rpm: 30, type: "U4", id: "motor" }],
+    driven: [{ pos: [1, 0], type: "U1", ratio: { of: "motor", value: 8 } }],
+    solution: [{ type: "U1", pos: [-0.5, 0] }, { type: "U2", pos: [-0.5, 0], stack: 0 }] },
+
+  { name: "Two Stages",
+    hint: "Stack a reduction on a reduction. Nothing but a shared shaft can multiply like this.",
+    inventory: ["U5", "U1", "U4", "U1"],
+    drives: [{ pos: [-4.5, 0], rpm: 180, type: "U2", id: "motor" }],
+    driven: [{ pos: [3.5, 0], type: "U3", ratio: { of: "motor", value: -1 / 30 } }],
+    solution: [{ type: "U5", pos: [-1, 0] }, { type: "U1", pos: [-1, 0], stack: 0 },
+               { type: "U4", pos: [1.5, 0] }, { type: "U1", pos: [1.5, 0], stack: 2 }] },
+
+  { name: "One In Sixty",
+    hint: "Three stages, sixty to one. The first pinion rides the motor's own shaft.",
+    inventory: ["U1", "U4", "U1", "U3", "U1"],
+    drives: [{ pos: [-3.75, 0], rpm: 60, type: "U2", id: "in" }],
+    driven: [{ pos: [3.75, 0], type: "U5", ratio: { of: "in", value: -1 / 60 } }],
+    solution: [{ type: "U1", pos: [-3.75, 0], stack: "in" },
+               { type: "U4", pos: [-1.25, 0] }, { type: "U1", pos: [-1.25, 0], stack: 1 },
+               { type: "U3", pos: [0.75, 0] }, { type: "U1", pos: [0.75, 0], stack: 3 }] },
+
+  { name: "Wind the Barrel",
+    hint: "A mainspring is a store, not a motor. Drive it and it fills — three turns.",
     inventory: ["U2", "U2"],
-    drives: [{ pos: [-3.25, 0], rpm: 90, type: "U3" }],
-    driven: [{ pos: [3.25, 0], type: "U2" }] },
-  { name: "The Full Set",
-    hint: "Spin the little triangle gear using the two gears provided.",
-    inventory: ["U2", "U2"],
-    drives: [{ pos: [-3, 0], rpm: 90, type: "U3" }],
-    driven: [{ pos: [3, 0], type: "U1" }] },
+    drives: [{ pos: [-3.5, 0], rpm: 120, type: "U2" }],
+    driven: [{ pos: [3, 0], type: "SP", wind_turns: 3 }],
+    solution: [{ type: "U2", pos: [-1.5, 0] }, { type: "U2", pos: [0.5, 0] }],
+    naive_solves: true },
+
+  { name: "Two Barrels",
+    hint: "One motor, two mainsprings. Branch the train and fill them both.",
+    inventory: ["U2", "U2", "U2"],
+    drives: [{ pos: [-6, 0], rpm: 90, type: "U2" }],
+    driven: [{ pos: [-2, 2.5], type: "SP", wind_turns: 2 },
+             { pos: [2.5, 0], type: "SP", wind_turns: 2 }],
+    solution: [{ type: "U2", pos: [-4, 0] }, { type: "U2", pos: [-2, 0] },
+               { type: "U2", pos: [0, 0] }] },
+
+  { name: "First Hand",
+    hint: "A wheel with a pointer on a dial is a hand. This one wants one turn every ten seconds.",
+    inventory: ["U3", "U1"],
+    drives: [{ pos: [-5, 0], rpm: -45, type: "U2" }],
+    driven: [{ pos: [0.5, 0], type: "U5", hand: "minute", dial: "MINUTES",
+               min_rpm: 5, max_rpm: 7 }],
+    solution: [{ type: "U3", pos: [-2.5, 0] }, { type: "U1", pos: [-2.5, 0], stack: 0 }] },
+
+  { name: "Twelve To One",
+    hint: "The motion work: a pinion into a four, then a pinion into a three. Exactly twelve to one.",
+    inventory: ["U1", "U4", "U1"],
+    drives: [{ pos: [-2.25, 0], rpm: 36, type: "U3", id: "in" }],
+    driven: [{ pos: [2.25, 0], type: "U3", ratio: { of: "in", value: 1 / 12 } }],
+    solution: [{ type: "U1", pos: [-2.25, 0], stack: "in" },
+               { type: "U4", pos: [0.25, 0] }, { type: "U1", pos: [0.25, 0], stack: 1 }] },
+
+  { name: "The Going Train",
+    hint: "Sub-assembly one: bring the barrel down to a tenth of its speed.",
+    inventory: ["U2", "U4", "U1"],
+    drives: [{ pos: [-6, 0], rpm: 20, type: "U2", id: "barrel" }],
+    driven: [{ pos: [2, 0], type: "U5", ratio: { of: "barrel", value: -0.1 } }],
+    solution: [{ type: "U2", pos: [-4, 0] }, { type: "U4", pos: [-1, 0] },
+               { type: "U1", pos: [-1, 0], stack: 1 }] },
+
+  { name: "The Dial Train",
+    hint: "Sub-assembly two: the hour hand turns once for every twelve of the minute hand.",
+    inventory: ["U1", "U4", "U1"],
+    drives: [{ pos: [-2.25, 0.5], rpm: -18, type: "U3", id: "minute",
+               hand: "minute", dial: "MINUTES" }],
+    driven: [{ pos: [2.25, 0.5], type: "U3", hand: "hour", dial: "HOURS",
+               ratio: { of: "minute", value: 1 / 12 } }],
+    solution: [{ type: "U1", pos: [-2.25, 0.5], stack: "minute" },
+               { type: "U4", pos: [0.25, 0.5] }, { type: "U1", pos: [0.25, 0.5], stack: 1 }] },
+
+  { name: "Barrel To Hand",
+    hint: "Sub-assembly three: fifteen barrel turns, one sweep of the minute hand.",
+    inventory: ["U1", "U3", "U1"],
+    drives: [{ pos: [-4, -1.6], rpm: -60, type: "U2", id: "barrel" }],
+    driven: [{ pos: [0.721, -0.861], type: "U5", hand: "minute", dial: "MINUTES",
+               ratio: { of: "barrel", value: 1 / 15 } }],
+    solution: [{ type: "U1", pos: [-4, -1.6], stack: "barrel" },
+               { type: "U3", pos: [-2.268, -0.6] },
+               { type: "U1", pos: [-2.268, -0.6], stack: 1 }] },
+
+  { name: "Gear Works",
+    hint: "The clock. Barrel to minute hand, fifteen to one; minute hand to hour hand, twelve to one.",
+    inventory: ["U1", "U3", "U1", "U1", "U4", "U1"],
+    drives: [{ pos: [-5.6, 2.6], rpm: -60, type: "U2", id: "barrel" }],
+    driven: [{ pos: [-1.781, -0.158], type: "U5", id: "minute",
+               hand: "minute", dial: "MINUTES", ratio: { of: "barrel", value: 1 / 15 } },
+             { pos: [1.905, 2.423], type: "U3",
+               hand: "hour", dial: "HOURS", ratio: { of: "minute", value: 1 / 12 } }],
+    solution: [{ type: "U1", pos: [-5.6, 2.6], stack: "barrel" },
+               { type: "U3", pos: [-4.6, 0.868] },
+               { type: "U1", pos: [-4.6, 0.868], stack: 1 },
+               { type: "U1", pos: [-1.781, -0.158], stack: "minute" },
+               { type: "U4", pos: [0.267, 1.276] },
+               { type: "U1", pos: [0.267, 1.276], stack: 4 }] },
 ];
 
 // ============================================================
@@ -1310,8 +1524,11 @@ class HexGearTile extends TileBase {
   }
 }
 class TriGearTile extends TileBase {
-  constructor(pos, Rp_small) {
-    super(pos, false);
+  constructor(pos, Rp_small, is_driver) {
+    // A U1 can be a motor like anything else — tapping one in free play already
+    // sets is_driver, so dropping the flag here only meant a U1 could never be
+    // spawned as one (which a level's drive needs to be).
+    super(pos, !!is_driver);
     this.label = "U1";
     this.set_pitch(Rp_small);
   }
@@ -1585,9 +1802,12 @@ class Game {
 
   // ---- mode switching ----
   _clear_board() {
-    this.tile_list = []; this.links = [];
+    // mesh_edges is cleared too: the menu never runs the solver, so a stale edge
+    // list from the previous board would otherwise survive into it and be read by
+    // anything that asks the menu what is on the bench.
+    this.tile_list = []; this.links = []; this.mesh_edges = [];
     this.dragging = false; this.drag_tile = null; this.selected_driver = null;
-    this.paused = false; this.win = false; this._mark_dirty();
+    this.paused = false; this.win = false; this._win_at = null; this._mark_dirty();
   }
   _main_menu_items() {
     const items = [["Free Play", "free"]];
@@ -1617,28 +1837,37 @@ class Game {
     // Level positions are authored in units of Rp2 (U2 pitch radius) from centre.
     return [this.origin[0] + this.Rp2 * p[0], this.origin[1] + this.Rp2 * p[1]];
   }
-  _add_anchor(type, pos, isDrive) {
-    const t = this._add_gear(type, this._levelPos(pos), isDrive);
+  _add_anchor(spec, isDrive) {
+    const t = this._add_gear(spec.type || "U2", this._levelPos(spec.pos), isDrive);
     t.anchored = true; t.role = isDrive ? "drive" : "driven";
+    t.spec = spec; t.lvid = spec.id || null;
+    if (spec.hand) t.hand = spec.hand;
+    if (spec.dial) t.dial = spec.dial;
     return t;
   }
+  _anchor(id) { return this.tile_list.find(t => t.lvid === id) || null; }
   _drop_inventory(inv) {
-    // Scatter the player's gears across the top of the arena, well clear of the
-    // fixed drive/target gears and of each other.
-    const n = inv.length;
-    for (let k = 0; k < n; k++) {
-      const type = inv[k];
-      const t = this._add_gear(type, [0, 0], false);
-      const rp = t.pitch_r();
-      let placed = false;
-      for (let attempt = 0; attempt < 400 && !placed; attempt++) {
-        const fx = this.W * (0.28 + 0.44 * (n > 1 ? k / (n - 1) : 0.5)) + (Math.random() - 0.5) * this.step * attempt * 0.15;
-        const fy = this.H * (0.80 - (attempt % 5) * 0.04);
-        const p = [fx, fy];
-        if (this.is_pos_safe(p[0], p[1]) && !this._overlaps(p, rp + this.step * 0.5, t)) { t.pos = p; placed = true; }
-      }
-      if (!placed) this._place_free(t, [this.W * 0.5, this.H * 0.8]);
-    }
+    // The player's parts are laid out in one tidy row along the bottom of the
+    // arena, in inventory order, left to right. Deterministic on purpose: a level
+    // looks identical every time it is opened, the row never lands on top of the
+    // machine, and the harness can assert where the parts are.
+    if (!inv.length) return;
+    const tiles = inv.map(type => this._add_gear(type, [0, 0], false));
+    const U = this.Rp2;
+    const rs = tiles.map(t => t.pitch_r() / U);
+    const maxR = Math.max(...rs);
+    const span = 2 * LEVEL_BOX.x;
+    let gap = STAGE_GAP;
+    const width = (g) => rs.reduce((a, r) => a + 2 * r, 0) + g * (rs.length - 1);
+    if (width(gap) > span) gap = Math.max(0.06, (span - width(0)) / Math.max(1, rs.length - 1));
+    const y = LEVEL_BOX.bottom + maxR + 0.15;
+    let x = -width(gap) / 2;
+    tiles.forEach((t, i) => {
+      x += rs[i];
+      t.pos = this._levelPos([x, y]);
+      t.z = 200 + i;
+      x += rs[i] + gap;
+    });
   }
   start_level(idx) {
     this.mode = "puzzle"; this._reset_camera();
@@ -1647,22 +1876,66 @@ class Game {
     this._clear_board();
     const lv = LEVELS[this.level_idx];
     for (const d of lv.drives) {
-      const t = this._add_anchor(d.type || "U2", d.pos, true);
+      const t = this._add_anchor(d, true);
       if (t) t.drive_speed = rpm_to_omega(d.rpm);
     }
-    for (const v of lv.driven) this._add_anchor(v.type || "U2", v.pos, false);
+    for (const v of lv.driven) this._add_anchor(v, false);
+    // Big wheels sit behind small ones: a compound reduction genuinely overlaps in
+    // plan view (see CLOCK.md), and this is what keeps it readable.
+    this.tile_list.forEach(t => { t.z = 40 - t.pitch_r() / this.Rp2; });
 
-    this._drop_inventory(lv.inventory || []);   // scatter the player's gears
+    this._drop_inventory(lv.inventory || []);   // stage the player's gears
 
     this.menu.set_buttons([["Restart", "restart"], ["Menu", "to_menu"]]);
     this.menu.layout(this.W, this.H);
+    this._win_at = null;
     this._mark_dirty(); this._ensure_rebuilt();
   }
   _placed_count() { let n = 0; for (const t of this.tile_list) if (!t.anchored) n++; return n; }
+  // Is one target's goal met? Every level's win condition goes through here, and
+  // every clause reads a value the ratio solver produced — nothing is special-cased
+  // and nothing is read out of the draw path.
+  target_ok(t) {
+    const s = t.spec || {};
+    if (s.wind_turns !== undefined) return Math.abs(t.wind || 0) / TAU >= s.wind_turns - 1e-9;
+    if (!(Math.abs(t.omega) > WIN_SPIN_EPS)) return false;
+    if (s.spin !== undefined && Math.sign(t.omega) !== Math.sign(s.spin)) return false;
+    const rpm = Math.abs(omega_to_rpm(t.omega));
+    if (s.min_rpm !== undefined && rpm < s.min_rpm) return false;
+    if (s.max_rpm !== undefined && rpm > s.max_rpm) return false;
+    if (s.ratio) {
+      const o = this._anchor(s.ratio.of);
+      if (!o || !(Math.abs(o.omega) > WIN_SPIN_EPS)) return false;
+      const got = t.omega / o.omega, want = s.ratio.value;
+      if (Math.abs(got - want) > Math.abs(want) * (s.ratio.tol !== undefined ? s.ratio.tol : 0.02)) return false;
+    }
+    return true;
+  }
+  // One line of plain English per target, for the objective panel and the tag the
+  // target wears on the board. Written once so the two can never disagree.
+  target_goal_text(t) {
+    const s = t.spec || {};
+    if (s.wind_turns !== undefined) return "WIND TO " + s.wind_turns;
+    if (s.ratio) {
+      const a = Math.abs(s.ratio.value);
+      const ref = this._anchor(s.ratio.of);
+      const of = " " + ((ref && (ref.dial || (ref.role === "drive" ? "DRIVE" : "TARGET"))) || "DRIVE");
+      // Sign is carried by the arrow on the part, not by a word: the arrow cannot
+      // be read backwards and "clockwise" can.
+      return (a >= 1 ? (Math.round(a * 10) / 10) + "×" : "1 : " + Math.round(1 / a)) + of;
+    }
+    if (s.min_rpm !== undefined && s.max_rpm !== undefined) return s.min_rpm + "–" + s.max_rpm + " RPM";
+    if (s.min_rpm !== undefined) return "OVER " + s.min_rpm + " RPM";
+    if (s.max_rpm !== undefined) return "UNDER " + s.max_rpm + " RPM";
+    if (s.spin !== undefined) return "TURN THIS WAY";
+    return "TURNING";
+  }
   _check_win() {
     const driven = this.tile_list.filter(t => t.role === "driven");
-    if (driven.length && driven.every(t => Math.abs(t.omega) > WIN_SPIN_EPS)) {
+    if (driven.length && driven.every(t => this.target_ok(t))) {
       this.win = true;
+      this._win_at = this.anim;
+      this._frame_solved();
     }
   }
 
@@ -1685,7 +1958,34 @@ class Game {
   _RH(label) { return this.R2 * (HEX_MULT[label] || 1.0); }  // hex radius for a size label
 
   // ---- view camera (zoom + pan) ----
-  _reset_camera() { this.zoom = 1; this.camPanX = 0; this.camPanY = 0; }
+  _reset_camera() { this.zoom = 1; this.camPanX = 0; this.camPanY = 0; this._cam_to = null; }
+  // Getting to watch your machine work is the reward, so a solved level frames
+  // itself: the camera eases onto the mechanism, fitted into the screen area the
+  // chrome and the completion sheet are NOT using.
+  _frame_solved() {
+    const live = new Set();
+    for (const [a, b] of this.mesh_edges) { live.add(a); live.add(b); }
+    const parts = this.tile_list.filter(t => t.anchored || live.has(t));
+    if (!parts.length) return;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const t of parts) {
+      const r = (t.dial ? this._dial_r(t) + 14 : t.pitch_r() * 1.30 + 22);
+      x0 = Math.min(x0, t.pos[0] - r); x1 = Math.max(x1, t.pos[0] + r);
+      y0 = Math.min(y0, t.pos[1] - r); y1 = Math.max(y1, t.pos[1] + r);
+    }
+    const m = this.menu, dock = m.w >= this.W * 0.5;   // mobile dock vs desktop rail
+    const L = dock ? 16 : m.x + m.w + 24, R = this.W - 16, TOP = 68;
+    const chromeBottom = dock ? this.H - (m.y + m.h) - 12 : this.H - 12;
+    const BOT = chromeBottom - (dock ? 182 : 116);     // room for the completion sheet
+    const sw = Math.max(120, R - L), sh = Math.max(120, BOT - TOP);
+    const z = clampf(Math.min(sw / Math.max(1, x1 - x0), sh / Math.max(1, y1 - y0)) * 0.96, 0.5, 1.8);
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    this._cam_to = { zoom: z, panX: (L + R) / 2 - z * cx, panY: (TOP + BOT) / 2 - z * (this.H - cy) };
+  }
+  // The completion UI waits a beat so the reveal is the machine, not a panel.
+  // Driven by the simulation clock, not wall time, so a headless run sees the same
+  // sequence a player does.
+  win_revealed() { return this.win && this._win_at !== null && (this.anim - this._win_at) > WIN_REVEAL_DELAY; }
   // Convert a canvas/screen point (CSS px, y-down) to world coords (y-up).
   screen_to_world(mx, my) {
     return [(mx - this.camPanX) / this.zoom, this.H - (my - this.camPanY) / this.zoom];
@@ -1765,13 +2065,24 @@ class Game {
   // them). Puzzle inventory staging still keeps its scattered pieces on-screen.
   is_pos_safe(x, y) { return this.mode !== "puzzle" || this._in_view(x, y); }
   _in_view(x, y) { const m = this.safe_margin; return x >= m && x <= this.W - m && y >= m && y <= this.H - m; }
-  // Would a gear of pitch rp at pos overlap any existing gear (beyond tangency)?
+  // Would a gear of pitch rp at pos overlap any existing gear?
+  //
+  // "Overlap" here is deliberately NOT "the pitch circles cross". A compound
+  // reduction genuinely overlaps in plan view — the pinion is smaller than its
+  // wheel, so the next wheel always sits inside the previous wheel's footprint —
+  // and refusing those placements makes every compound train unbuildable. Real
+  // trains solve it by stacking axially, which is exactly what a shared shaft is.
+  //
+  // The rule is instead: a centre may not come inside another gear's pitch circle.
+  // That still stops a gear being dropped on top of another (the ambiguous case
+  // stacking is for) while letting layered wheels sit where they physically sit.
   _overlaps(pos, rp, ignore) {
     for (const t of this.tile_list) {
       if (t === ignore || (ignore && t === ignore.partner)) continue;
       if (t.is_rack() || t.is_ring()) continue; // bars and rings don't block a gear
       if (t.partner) continue;   // shaft gears sit in their own plane — don't block nesting
-      if (dist(pos, t.pos) < rp + t.pitch_r() - this.mesh_tol*1.5) return true;
+      const d = dist(pos, t.pos), ro = t.pitch_r();
+      if (d < Math.max(rp, ro) - this.mesh_tol*1.5) return true;
     }
     return false;
   }
@@ -1921,12 +2232,12 @@ class Game {
     const t = new HexGearTile(pos.slice(), R, is_driver, label);
     this.tile_list.push(t); return t;
   }
-  _add_tri(pos) {
-    const t = new TriGearTile(pos.slice(), this.Rp_small);
+  _add_tri(pos, is_driver) {
+    const t = new TriGearTile(pos.slice(), this.Rp_small, is_driver);
     this.tile_list.push(t); return t;
   }
   _add_gear(type, pos, is_driver) {
-    return type === "U1" ? this._add_tri(pos) : this._add_hex(pos, this._RH(type), is_driver, type);
+    return type === "U1" ? this._add_tri(pos, is_driver) : this._add_hex(pos, this._RH(type), is_driver, type);
   }
   _spawn_initial() {
     const cx = this.origin[0], cy = this.origin[1], s = this.step;
@@ -2270,6 +2581,12 @@ class Game {
   update(dt) {
     this.anim += dt;                    // presentation clock: never gates physics
     if (this.mode === "menu") return;
+    if (this._cam_to) {
+      const k = 1 - Math.exp(-dt * 5.5);
+      this.zoom += (this._cam_to.zoom - this.zoom) * k;
+      this.camPanX += (this._cam_to.panX - this.camPanX) * k;
+      this.camPanY += (this._cam_to.panY - this.camPanY) * k;
+    }
     this._ensure_rebuilt();
     if (this.paused) return;
     this._apply_drive_dynamics(dt);
@@ -2457,13 +2774,14 @@ class Game {
       ctx.strokeStyle = ca(T.edgeHi, 0.30); ctx.lineWidth = 1 / this.zoom; ctx.stroke();
     }
 
+    if (this.mode === "puzzle") this._draw_dials();
     this.draw_pitch_circles();
     this.draw_mesh_lines();
     _zBuf.length = 0;
     for (const t of this.tile_list) _zBuf.push(t);
     _zBuf.sort(_byZ);
     for (const t of _zBuf) t.draw();
-    if (this.mode === "puzzle") this._draw_roles();
+    if (this.mode === "puzzle") { this._draw_hands(); this._draw_roles(); }
     this._draw_links();
     this._draw_flashes();
     this._draw_selected_highlight();
@@ -2485,26 +2803,130 @@ class Game {
     ctx.strokeStyle = ca(color, 0.42); ctx.lineWidth = 1; ctx.stroke();
     G.label(text, cx, cy, { size, weight: 600, align: "center", track: T.trackLabel, color, alpha: 0.95 });
   }
+  // A dial is a rendering mode on a gear, not a part: a recessed plate with hour
+  // marks and minute ticks, drawn BEHIND the wheel so the wheel still reads as the
+  // wheel. It adds no node, no edge, no inertia and no ratio — see CLOCK.md.
+  _dial_r(t) { return t.pitch_r() * 1.10 + 4; }
+  _draw_dials() {
+    const ctx = G.ctx;
+    for (const t of this.tile_list) {
+      if (!t.dial) continue;
+      const R = this._dial_r(t);
+      ctx.save();
+      ctx.translate(t.pos[0], G.fy(t.pos[1]));
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU);
+      ctx.fillStyle = "rgba(6,8,11,0.80)"; ctx.fill();
+      ctx.strokeStyle = ca(T.edgeHi, 0.55); ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, R - 2.5, 0, TAU);
+      ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.lineWidth = 1; ctx.stroke();
+      for (let k = 0; k < 60; k++) {
+        const a = -k * TAU / 60 - Math.PI / 2;      // 12 at the top, running clockwise
+        const big = k % 5 === 0;
+        const r0 = R - (big ? 9 : 4.5), r1 = R - 3;
+        ctx.beginPath();
+        ctx.moveTo(r0 * Math.cos(a), r0 * Math.sin(a));
+        ctx.lineTo(r1 * Math.cos(a), r1 * Math.sin(a));
+        ctx.strokeStyle = ca(big ? T.cyanHi : T.ink3, big ? 0.80 : 0.34);
+        ctx.lineWidth = big ? 2 : 1;
+        ctx.stroke();
+      }
+      ctx.restore();
+      G.label(t.dial, t.pos[0], t.pos[1] - R - 11,
+              { size: 9, weight: 600, align: "center", track: T.trackLabel,
+                color: T.ink3, alpha: 0.95 });
+    }
+  }
+  // The pointer itself, on top of the wheel, at the wheel's own angle. A hand is a
+  // readout, so it stays in ink rather than spending one of the two signal colours.
+  _draw_hands() {
+    const ctx = G.ctx;
+    for (const t of this.tile_list) {
+      if (!t.hand) continue;
+      const R = t.pitch_r(), hour = t.hand === "hour";
+      const len = R * (hour ? 0.66 : 0.94), tail = R * 0.20, w = hour ? 4.2 : 3.0;
+      ctx.save();
+      ctx.translate(t.pos[0], G.fy(t.pos[1]));
+      ctx.rotate(-t.angle);                        // canvas y is flipped
+      ctx.beginPath();
+      ctx.moveTo(-tail, -w * 0.5); ctx.lineTo(len - w, -w * 0.5);
+      ctx.lineTo(len, 0); ctx.lineTo(len - w, w * 0.5); ctx.lineTo(-tail, w * 0.5);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.translate(1, 1.5); ctx.fill(); ctx.translate(-1, -1.5);
+      ctx.fillStyle = T.ink; ctx.fill();
+      ctx.restore();
+      ctx.beginPath();
+      ctx.arc(t.pos[0], G.fy(t.pos[1]), Math.max(3, R * 0.11), 0, TAU);
+      ctx.fillStyle = T.amber; ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.lineWidth = 1.2; ctx.stroke();
+    }
+  }
+  // A curved arrow showing which way something turns (or must turn). Direction is
+  // shown, never named: the sign of omega and the sign a level asks for are the
+  // same quantity, and an arrow cannot get "clockwise" backwards.
+  _draw_spin_arrow(x, y, r, sign, color, alpha) {
+    const ctx = G.ctx, a0 = -0.62, a1 = 0.62;
+    ctx.save();
+    ctx.translate(x, G.fy(y));
+    ctx.scale(1, -1);                              // work in world orientation
+    ctx.beginPath();
+    ctx.arc(0, 0, r, sign > 0 ? a0 : -a1, sign > 0 ? a1 : -a0);
+    ctx.strokeStyle = ca(color, alpha); ctx.lineWidth = 2.4; ctx.lineCap = "round";
+    ctx.stroke();
+    const ae = sign > 0 ? a1 : -a1, tan = ae + sign * Math.PI / 2;
+    const hx = r * Math.cos(ae), hy = r * Math.sin(ae), h = 6.5;
+    ctx.beginPath();
+    ctx.moveTo(hx + h * Math.cos(tan), hy + h * Math.sin(tan));
+    ctx.lineTo(hx + h * 0.55 * Math.cos(tan + 2.5), hy + h * 0.55 * Math.sin(tan + 2.5));
+    ctx.lineTo(hx + h * 0.55 * Math.cos(tan - 2.5), hy + h * 0.55 * Math.sin(tan - 2.5));
+    ctx.closePath();
+    ctx.fillStyle = ca(color, alpha); ctx.fill();
+    ctx.lineCap = "butt";
+    ctx.restore();
+  }
   _draw_roles() {
     for (const t of this.tile_list) {
       if (t.role === "drive") {
         G.dashRing(t.pos[0], t.pos[1], t.pitch_r() * 1.30, T.amber, 0.85, 2, 7, 6, -this.anim * 26);
         G.ring(t.pos[0], t.pos[1], t.pitch_r() * 1.30, T.amber, 0.14, 6);
         this._draw_tag(t.pos[0], t.pos[1] - t.pitch_r() * 1.30 - 13, "DRIVE", T.amber);
-      } else if (t.role === "driven") {
-        const on = Math.abs(t.omega) > WIN_SPIN_EPS;
-        if (on !== !!t._live) {
-          t._live = on;
-          if (on) this.flash(t.pos[0], t.pos[1], t.pitch_r() * 2.4, T.green);
+        if (Math.abs(t.omega) > WIN_SPIN_EPS) {
+          this._draw_spin_arrow(t.pos[0], t.pos[1], t.pitch_r() * 1.46,
+                                Math.sign(t.omega), T.amber, 0.75);
         }
-        const col = on ? T.green : T.ink2;
-        if (on) {
+      } else if (t.role === "driven") {
+        const ok = this.target_ok(t);
+        if (ok !== !!t._live) {
+          t._live = ok;
+          if (ok) this.flash(t.pos[0], t.pos[1], t.pitch_r() * 2.4, T.green);
+        }
+        const col = ok ? T.green : T.ink2;
+        if (ok) {
           G.ring(t.pos[0], t.pos[1], t.pitch_r() * 1.30, col, 0.9, 2);
           G.ring(t.pos[0], t.pos[1], t.pitch_r() * 1.30, col, 0.16, 7);
         } else {
           G.dashRing(t.pos[0], t.pos[1], t.pitch_r() * 1.30, col, 0.55, 2, 4, 7, 0);
         }
-        this._draw_tag(t.pos[0], t.pos[1] - t.pitch_r() * 1.30 - 13, on ? "TARGET ✓" : "TARGET", col);
+        // The goal, on the part it applies to — a level with three different
+        // targets should not need the player to look anywhere else.
+        this._draw_tag(t.pos[0], t.pos[1] - t.pitch_r() * 1.30 - 13,
+                       ok ? "✓ " + this.target_goal_text(t) : this.target_goal_text(t), col);
+        const s = t.spec || {};
+        const wantSpin = s.spin !== undefined ? Math.sign(s.spin)
+          : (s.ratio ? Math.sign(s.ratio.value) * Math.sign((this._anchor(s.ratio.of) || {}).omega || 1) : 0);
+        if (wantSpin) {
+          this._draw_spin_arrow(t.pos[0], t.pos[1], t.pitch_r() * 1.46, wantSpin, col, ok ? 0.9 : 0.7);
+        }
+        if (s.wind_turns !== undefined) {
+          const f = clampf(Math.abs(t.wind || 0) / (s.wind_turns * TAU), 0, 1);
+          G.ring(t.pos[0], t.pos[1], t.pitch_r() * 1.44, T.cyanDim, 0.5, 3);
+          const ctx = G.ctx;
+          ctx.beginPath();
+          ctx.arc(t.pos[0], G.fy(t.pos[1]), t.pitch_r() * 1.44,
+                  -Math.PI / 2, -Math.PI / 2 + f * TAU);
+          ctx.strokeStyle = ca(ok ? T.green : T.cyan, 0.95); ctx.lineWidth = 3;
+          ctx.lineCap = "round"; ctx.stroke(); ctx.lineCap = "butt";
+        }
       }
     }
   }
@@ -2934,8 +3356,12 @@ const CHROME = {
     this._winKey = null;
   },
   syncWin(game) {
-    const on = !!game.win && game.mode === "puzzle";
+    // Gated on win_revealed(), not on win: the mechanism gets a beat to itself
+    // before any UI arrives over it.
+    const on = game.mode === "puzzle" && game.win_revealed();
     this.el.win.classList.toggle("on", on);
+    const ws = on ? "1" : "0";
+    if (this.el.body.dataset.win !== ws) this.el.body.dataset.win = ws;
     if (!on) { this._winKey = null; return; }
     const key = game.level_idx + "|" + game._win_items().map((i) => i[1]).join(",");
     if (this._winKey === key) return;
@@ -2943,10 +3369,11 @@ const CHROME = {
     const lv = LEVELS[game.level_idx];
     this.set(this.el.winSub, "Level " + (game.level_idx + 1) + " — " + lv.name);
     // what the player actually built — a small, honest result readout
-    const parts = game.tile_list.filter((t) => !t.anchored).length;
+    const seated = game.tile_list.filter((t) =>
+      !t.anchored && (t.partner || game.mesh_edges.some(([a, b]) => a === t || b === t))).length;
     this.el.winStats.innerHTML =
-      '<div class="meter"><span class="k">Parts placed</span><span class="v">' + parts + "</span></div>" +
-      '<div class="meter"><span class="k">Mesh points</span><span class="v cyan">' + game.mesh_edges.length + "</span></div>";
+      '<div class="meter"><span class="k">Parts</span><span class="v">' + seated + "</span></div>" +
+      '<div class="meter"><span class="k">Mesh</span><span class="v cyan">' + game.mesh_edges.length + "</span></div>";
     const acts = this.el.winActs;
     acts.innerHTML = "";
     for (const [label, id] of game._win_items()) {
@@ -3087,8 +3514,23 @@ const CHROME = {
         '<span class="name">' + lv.name + "</span>" +
         '<span class="hint">' + lv.hint + "</span>" +
         '<span class="row"><span class="k eyebrow" style="flex:0 0 auto">Targets</span>' +
-        '<span class="v"></span></span>';
-      this.el.r = { targets: brief.querySelector(".row .v") };
+        '<span class="v"></span></span>' +
+        '<span class="goals"></span>';
+      // One row per target, spelling out that target's actual goal. A level with
+      // three different requirements should never make the player guess which is
+      // which — the same string is engraved on the part itself.
+      const goals = brief.querySelector(".goals");
+      const targets = game.tile_list.filter((t) => t.role === "driven");
+      this.el.r = { targets: brief.querySelector(".row .v"), goals: [] };
+      targets.forEach((t, i) => {
+        const g = document.createElement("span");
+        g.className = "goal";
+        g.innerHTML = '<i class="dot"></i><span class="gt">' +
+          (targets.length > 1 ? (t.dial || t.lvid || "Target " + (i + 1)) + " · " : "") +
+          game.target_goal_text(t) + "</span>";
+        goals.appendChild(g);
+        this.el.r.goals.push({ el: g, tile: t });
+      });
       lvg.appendChild(brief);
       if (has("restart")) lvg.appendChild(this.btn("restart", "Restart", "restart", "", () => game._handle_menu("restart")));
       rail.appendChild(lvg);
@@ -3140,7 +3582,7 @@ const CHROME = {
       this.set(this.el.lvchip, "Level " + (game.level_idx + 1));
       this.set(this.el.lvname, lv.name);
       const driven = game.tile_list.filter((t) => t.role === "driven");
-      const on = driven.filter((t) => Math.abs(t.omega) > WIN_SPIN_EPS).length;
+      const on = driven.filter((t) => game.target_ok(t)).length;
       this.set(m.targets, on + " / " + driven.length);
       m.targets.className = "v " + (driven.length && on === driven.length ? "" : "cyan");
       if (driven.length && on === driven.length) m.targets.style.color = "var(--green)";
@@ -3153,6 +3595,9 @@ const CHROME = {
       if (this.el.r && this.el.r.targets) {
         this.set(this.el.r.targets, on + " / " + driven.length);
         this.el.r.targets.classList.toggle("done", !!driven.length && on === driven.length);
+      }
+      if (this.el.r && this.el.r.goals) {
+        for (const g of this.el.r.goals) g.el.classList.toggle("done", game.target_ok(g.tile));
       }
     } else {
       this.set(m.status, game.paused ? "PAUSED" : "RUNNING");
@@ -3211,7 +3656,8 @@ const CHROME = {
 };
 
 // Expose for headless testing
-if (typeof globalThis !== "undefined") globalThis.__GW = { Game, G, tri_to_screen, rpm_to_omega, omega_to_rpm, LEVELS };
+if (typeof globalThis !== "undefined") globalThis.__GW = { Game, G, tri_to_screen, rpm_to_omega, omega_to_rpm, LEVELS,
+                                                LEVEL_BOX, SPRING_MAX_WIND, WIN_REVEAL_DELAY };
 
 // ============================================================
 // Browser boot

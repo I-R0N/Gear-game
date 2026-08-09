@@ -1,19 +1,26 @@
 // Headless regression suite.  `npm test`
 //
-// Three layers, in increasing strictness:
-//   1. solvability  — every level can still be completed by seating its inventory
-//   2. invariants   — mesh ratios, shaft coupling, rack kinematics, no NaNs
-//   3. baseline     — a numeric fingerprint of the whole board after a fixed number
-//                     of fixed-dt frames, compared against tests/baseline.json.
-//                     This is what enforces "presentation-only": any change to the
-//                     physics, meshing or snapping shifts the fingerprint.
+// Five layers, in increasing strictness:
+//   1. campaign    — exactly 20 levels, each solvable from its OWN solution spec,
+//                    with exactly the meshes that spec implies and nothing locked
+//   2. no cheese   — degenerate placements do not win, every placed part is
+//                    load-bearing, and no spring level can wind itself into a
+//                    soft-lock
+//   3. fit         — every part of every level, placed and staged, lies inside the
+//                    intersection of the safe boxes measured at BOTH viewports
+//   4. invariants  — mesh ratios, shaft coupling, rack kinematics, no NaNs
+//   5. baseline    — a numeric fingerprint of the whole board after a fixed number
+//                    of fixed-dt frames, compared against tests/baseline.json.
+//                    Free-play scenes are the presentation-only guard; the puzzle
+//                    and win scenes are content and are re-anchored deliberately.
 //
 //   node scripts/test.mjs --update    regenerate the baseline (only when the
 //                                     behaviour change is intended and reviewed)
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { launch, openPage, ROOT } from "./browser.mjs";
-import { SCENES, preamble } from "./scenes.mjs";
+import { SCENES, preamble, VIEWPORTS } from "./scenes.mjs";
+import { levelKit, intersectBoxes } from "./levels.mjs";
 
 const UPDATE = process.argv.includes("--update");
 const FILE = (() => {
@@ -21,6 +28,12 @@ const FILE = (() => {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : "gear_works.html";
 })();
 const BASELINE = path.join(ROOT, "tests", "baseline.json");
+
+// Pitch radii in level units. Duplicated here ON PURPOSE: computing the expected
+// mesh set from the same code the engine uses would prove nothing.
+const RP = { U1: 0.5, U2: 1.0, U3: 1.5, U4: 2.0, U5: 2.5, SP: 1.5 };
+const MESH_TOL = 0.15;        // engine tolerance, in level units (step*0.14 / 0.933)
+const MIN_CLEARANCE = 0.30;   // how far a non-meshing pair must stay from tangency
 
 let pass = 0;
 const failures = [];
@@ -32,49 +45,145 @@ function check(name, ok, detail) {
 const browser = await launch();
 const page = await openPage(browser, { file: FILE, width: 1280, height: 800, dpr: 1 });
 await page.addScriptTag({ content: preamble });
+const hasCampaign = await page.evaluate(() => !!(window.__GW.LEVELS[0] || {}).solution);
+if (hasCampaign) await page.addScriptTag({ content: levelKit });
 
-// ---------------------------------------------------------------- solvability
-console.log("\nlevel solvability");
-// which drive/target chain each inventory gear belongs to, in inventory order
-const PAIRING = [[0], [0, 0, 0], [0, 0, 1, 1], [0, 0], [0, 0]];
-const solved = await page.evaluate((pairing) => {
-  const g = window.__GW.game;
-  const out = [];
-  for (let idx = 0; idx < window.__GW.LEVELS.length; idx++) {
-    g.start_level(idx);
-    const loose = g.tile_list.filter((t) => !t.anchored);
-    const drives = g.tile_list.filter((t) => t.role === "drive");
-    const targets = g.tile_list.filter((t) => t.role === "driven");
-    const head = drives.slice();
-    loose.forEach((t, i) => {
-      const k = pairing[idx][i];
-      const from = head[k], to = targets[k];
-      let dx = to.pos[0] - from.pos[0], dy = to.pos[1] - from.pos[1];
-      const d = Math.hypot(dx, dy) || 1;
-      const R = from.pitch_r() + t.pitch_r();
-      const p = [from.pos[0] + (dx / d) * R, from.pos[1] + (dy / d) * R];
-      t.pos = p.slice();
-      g._snap_gear(t, p.slice());
-      head[k] = t;
-    });
-    g._mark_dirty();
-    for (let f = 0; f < 240; f++) g.update(1 / 60);
-    out.push({
-      name: window.__GW.LEVELS[idx].name,
-      win: g.win,
-      edges: g.mesh_edges.length,
-      targets: targets.map((t) => t.omega),
-    });
+const LEVELS = await page.evaluate(() => JSON.parse(JSON.stringify(window.__GW.LEVELS)));
+
+// `--file <pre-overhaul build>` re-anchors the fingerprint against a build that
+// predates the campaign. Everything below layer 4 is skipped for that run.
+if (!hasCampaign) console.log("\ncampaign — skipped: this build has no level solution specs");
+
+if (hasCampaign) {
+// ------------------------------------------------------------------- campaign
+console.log("\ncampaign");
+check(`exactly 20 levels (${LEVELS.length})`, LEVELS.length === 20, `got ${LEVELS.length}`);
+
+// The mesh set each level's spec IMPLIES, computed here from the declared numbers.
+function expectedMeshes(lv) {
+  const parts = [];
+  const byId = {};
+  for (const d of lv.drives) { const p = { key: (d.id || "drive") + ":" + d.type, pos: d.pos, r: RP[d.type] }; parts.push(p); if (d.id) byId[d.id] = p; }
+  for (const v of lv.driven) { const p = { key: (v.id || "driven") + ":" + v.type, pos: v.pos, r: RP[v.type] }; parts.push(p); if (v.id) byId[v.id] = p; }
+  const sol = [];
+  for (const s of lv.solution) {
+    let pos = s.pos, base = null;
+    if (s.stack !== undefined) { base = typeof s.stack === "number" ? sol[s.stack] : byId[s.stack]; pos = base.pos; }
+    const p = { key: s.type + "@" + pos[0].toFixed(2) + "," + pos[1].toFixed(2), pos, r: RP[s.type], base };
+    sol.push(p); parts.push(p);
   }
-  return out;
-}, PAIRING);
+  const edges = [], tight = [];
+  for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
+    const a = parts[i], b = parts[j];
+    if (a.base === b || b.base === a) continue;                       // shaft partners
+    const d = Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]);
+    const gap = d - (a.r + b.r);
+    if (Math.abs(gap) <= MESH_TOL) edges.push([a.key, b.key].sort().join(" ~ "));
+    else if (Math.abs(gap) < MIN_CLEARANCE) tight.push(`${a.key}/${b.key} ${gap.toFixed(3)}`);
+  }
+  return { edges: edges.sort(), tight };
+}
 
-for (const r of solved) {
-  check(`level "${r.name}" solves`, r.win === true,
-    r.win ? "" : `win=${r.win} edges=${r.edges} target omegas=${r.targets.map((o) => o.toFixed(4)).join(", ")}`);
-  check(`level "${r.name}" targets all spinning`,
-    r.targets.length > 0 && r.targets.every((o) => Math.abs(o) > 1e-2),
-    r.targets.map((o) => o.toFixed(4)).join(", "));
+const solved = [];
+for (let i = 0; i < LEVELS.length; i++) {
+  const lv = LEVELS[i];
+  const r = await page.evaluate((i) => window.__L.solve(i), i);
+  solved.push(r);
+  const want = expectedMeshes(lv);
+  const label = `${i + 1} "${lv.name}"`;
+  check(`${label} solves from its own spec`, r.win === true,
+    r.win ? "" : "locked=" + r.locked + " edges=" + r.edges + " targets=" + JSON.stringify(r.targets));
+  check(`${label} has exactly the ${want.edges.length} meshes its spec implies`,
+    JSON.stringify(r.edgeKeys) === JSON.stringify(want.edges),
+    "want " + want.edges.join(" | ") + "\n      got  " + r.edgeKeys.join(" | "));
+  check(`${label} nothing locked, no NaN`, r.locked === 0 && !r.nan,
+    `locked=${r.locked} nan=${r.nan}`);
+  check(`${label} keeps ${MIN_CLEARANCE} clearance off an accidental mesh`,
+    !want.tight.length && r.tightest.clearance >= MIN_CLEARANCE - 1e-9,
+    (want.tight.join(", ") || "") + " nearest " + r.tightest.pair + " " + r.tightest.clearance);
+  check(`${label} inventory matches its solution`,
+    lv.inventory.length === lv.solution.length &&
+    lv.inventory.every((t, k) => t === lv.solution[k].type),
+    `inventory ${lv.inventory.join(",")} vs solution ${lv.solution.map((s) => s.type).join(",")}`);
+}
+
+// ------------------------------------------------------------------ no cheese
+console.log("\nno cheese");
+for (let i = 0; i < LEVELS.length; i++) {
+  const lv = LEVELS[i], label = `${i + 1} "${lv.name}"`;
+  const heap = await page.evaluate((i) => window.__L.heap(i), i);
+  check(`${label} is not won by tipping the inventory into a heap`, heap.win === false,
+    JSON.stringify(heap.targets));
+  const naive = await page.evaluate((i) => window.__L.naive(i), i);
+  if (lv.naive_solves) {
+    check(`${label} IS won by the obvious chain (declared: it is the tutorial)`, naive.win === true,
+      JSON.stringify(naive.targets));
+  } else {
+    check(`${label} is not won by blindly chaining off the drive`, naive.win === false,
+      JSON.stringify(naive.targets));
+  }
+  // every placed part is load-bearing
+  const bad = [];
+  for (let k = 0; k < lv.solution.length; k++) {
+    const r = await page.evaluate(([i, k]) => window.__L.solve(i, { skip: k }), [i, k]);
+    if (r.win) bad.push(`${k}:${lv.solution[k].type}`);
+  }
+  check(`${label} needs all ${lv.solution.length} of its parts`, bad.length === 0,
+    "still wins without " + bad.join(", "));
+}
+
+// A wound barrel that reaches its hard stop while the motor is still driving holds
+// the train at zero for good. Prove that cannot happen before the goal is met.
+console.log("\nspring soft-lock guard");
+for (let i = 0; i < LEVELS.length; i++) {
+  const lv = LEVELS[i];
+  const winds = lv.driven.filter((v) => v.wind_turns !== undefined);
+  if (!winds.length) continue;
+  const c = await page.evaluate((i) => window.__L.windCeiling(i), i);
+  const mixed = lv.driven.length !== winds.length;
+  const ok = winds.every((v) => v.wind_turns < c.peakTurns - 1e-9) &&
+             (!mixed || c.peakTurns < c.maxTurns - 1e-9);
+  check(`${i + 1} "${lv.name}" barrel settles above its goal and cannot lock the train`, ok,
+    `goals ${winds.map((v) => v.wind_turns).join(",")} peak ${c.peakTurns} stop ${c.maxTurns}` +
+    (mixed ? " (level mixes wind and non-wind targets)" : ""));
+}
+
+// ------------------------------------------------------------------------ fit
+// The horizontal limit comes from 390x844 and both vertical limits from 1280x800,
+// so a level that only fits on desktop has to fail here rather than ship.
+console.log("\nfit inside the safe box at both viewports");
+{
+  const boxes = [];
+  for (const vp of VIEWPORTS) {
+    const p2 = await openPage(browser, { file: FILE, width: vp.width, height: vp.height, dpr: 1 });
+    await p2.addScriptTag({ content: levelKit });
+    await p2.evaluate(() => window.__GW.game.start_level(0));
+    await p2.waitForTimeout(260);
+    boxes.push(await p2.evaluate(() => window.__L.safeBox()));
+    await p2.close();
+  }
+  const box = intersectBoxes(boxes);
+  console.log(`  box  x [${box.x0.toFixed(2)}, ${box.x1.toFixed(2)}]  y [${box.y0.toFixed(2)}, ${box.y1.toFixed(2)}]  (intersection of ${VIEWPORTS.map((v) => v.width + "x" + v.height).join(" and ")})`);
+  const declared = await page.evaluate(() => window.__GW.LEVEL_BOX);
+  check("the authoring box the game uses is inside the measured box",
+    declared.x <= box.x1 + 1e-6 && -declared.x >= box.x0 - 1e-6 &&
+    declared.top <= box.y1 + 1e-6 && declared.bottom >= box.y0 - 1e-6,
+    `LEVEL_BOX x±${declared.x} y [${declared.bottom}, ${declared.top}]`);
+  for (let i = 0; i < LEVELS.length; i++) {
+    // start state (everything staged) and solved state (everything placed)
+    const start = await page.evaluate((i) => { window.__L.g().start_level(i); return window.__L.report(i); }, i);
+    const out = [];
+    for (const [tag, r] of [["staged", start], ["solved", solved[i]]]) {
+      for (const p of r.parts) {
+        const e = Math.max(p.r, p.tip);
+        if (p.x - e < box.x0 || p.x + e > box.x1 || p.y - e < box.y0 || p.y + e > box.y1) {
+          out.push(`${tag} ${p.label}@${p.x},${p.y} r${e.toFixed(2)}`);
+        }
+      }
+    }
+    check(`${i + 1} "${LEVELS[i].name}" fits`, out.length === 0, out.join(" · "));
+  }
+}
 }
 
 // ----------------------------------------------------------------- invariants
@@ -126,6 +235,30 @@ for (const name of ["free", "puzzle", "planetary"]) {
   if (name === "planetary") check(`planetary: ring meshes engaged (${res.rings})`, res.rings >= 3);
 }
 
+// A campaign win condition is only as good as the omegas it reads, so the goal
+// checker is exercised against the solver directly rather than through the UI.
+if (hasCampaign) {
+  console.log("\nwin conditions read the solver, not the draw path");
+  const wc = await page.evaluate(() => {
+    const L = window.__L, g = L.g(), out = [];
+    for (let i = 0; i < L.levels().length; i++) {
+      L.solve(i);
+      for (const t of g.tile_list.filter((x) => x.role === "driven")) {
+        const s = t.spec || {};
+        if (!s.ratio) continue;
+        const o = g._anchor(s.ratio.of);
+        // the ratio the solver produced, recomputed from pitch-line velocities
+        out.push({ i: i + 1, want: s.ratio.value, got: t.omega / o.omega, ok: g.target_ok(t) });
+      }
+    }
+    return out;
+  });
+  const off = wc.filter((r) => Math.abs(r.got - r.want) > Math.abs(r.want) * 1e-6);
+  check(`${wc.length} ratio goals are exact to 1e-6, not merely inside tolerance`, off.length === 0,
+    off.map((r) => `L${r.i} want ${r.want} got ${r.got}`).join(" | "));
+  check("every ratio goal is satisfied at the solution", wc.every((r) => r.ok));
+}
+
 // ---------------------------------------------------------------- interaction
 // The chrome layer sits over the canvas, so every pointer path it could have
 // broken gets exercised with REAL mouse events, not synthetic calls.
@@ -133,9 +266,6 @@ console.log("\ninteraction through the chrome layer");
 {
   const ip = await openPage(browser, { file: FILE, width: 1280, height: 800, dpr: 1 });
   await ip.addScriptTag({ content: preamble });
-  // `--file <pre-overhaul build>` is how the baseline gets re-anchored, and that
-  // build predates the chrome layer. Skip rather than fail: the point of that
-  // run is the physics fingerprint, not the DOM.
   await ip.evaluate(() => { window.__GW.game.start_free_play(); window.__GW.step(2, 1 / 60); });
   const hasChrome = await ip.evaluate(() => !!document.getElementById("rail"));
   if (!hasChrome) {
@@ -219,20 +349,20 @@ console.log("\ninteraction through the chrome layer");
   const lvl = await ip.evaluate(() => ({ mode: window.__GW.game.mode, idx: window.__GW.game.level_idx }));
   check("title level row starts the level", lvl.mode === "puzzle" && lvl.idx === 1, JSON.stringify(lvl));
 
-  // 6. dragging an inventory gear into place solves the level and shows the overlay
+  // 6. dragging an inventory gear into place solves the level and shows the sheet
   const seat = await ip.evaluate(() => {
     const g = window.__GW.game;
     const loose = g.tile_list.filter((t) => !t.anchored);
-    const drive = g.tile_list.find((t) => t.role === "drive");
-    const targ = g.tile_list.find((t) => t.role === "driven");
-    // seat two by hand, drag the third with the mouse
-    [-2, 0].forEach((u, i) => {
-      const p = [g.origin[0] + g.Rp2 * u, drive.pos[1]];
+    // seat all but the last by hand, drag the last one with the mouse
+    const sol = window.__GW.LEVELS[g.level_idx].solution;
+    for (let i = 0; i < sol.length - 1; i++) {
+      const p = [g.origin[0] + g.Rp2 * sol[i].pos[0], g.origin[1] + g.Rp2 * sol[i].pos[1]];
       loose[i].pos = p.slice(); g._snap_gear(loose[i], p.slice());
-    });
+    }
     g._mark_dirty();
-    const t = loose[2];
-    return { uid: t.uid, from: t.pos.slice(), to: [g.origin[0] + g.Rp2 * 2, targ.pos[1]] };
+    const last = sol[sol.length - 1], t = loose[sol.length - 1];
+    return { uid: t.uid, from: t.pos.slice(),
+             to: [g.origin[0] + g.Rp2 * last.pos[0], g.origin[1] + g.Rp2 * last.pos[1]] };
   });
   p1 = await toScreen(seat.from);
   const p3 = await toScreen(seat.to);
@@ -242,15 +372,35 @@ console.log("\ninteraction through the chrome layer");
     await ip.mouse.move(p1[0] + (p3[0] - p1[0]) * i / 10, p1[1] + (p3[1] - p1[1]) * i / 10);
   }
   await ip.mouse.up();
-  await ip.evaluate(() => window.__GW.step(120, 1 / 60));
-  await ip.waitForTimeout(200);
-  const won = await ip.evaluate(() => ({
+  // one frame past the win, but well before the reveal beat has elapsed
+  await ip.evaluate(() => window.__GW.step(6, 1 / 60));
+  await ip.waitForTimeout(120);
+  const early = await ip.evaluate(() => ({
     win: window.__GW.game.win,
     overlay: document.getElementById("winscreen").classList.contains("on"),
-    next: !!document.querySelector('#win-acts .btn[data-id="next"]'),
   }));
-  check("mouse-dragging the last gear solves the level", won.win, JSON.stringify(won));
-  check("win overlay appears with a Next Level action", won.overlay && won.next, JSON.stringify(won));
+  check("mouse-dragging the last gear solves the level", early.win, JSON.stringify(early));
+  check("the solved mechanism gets a beat to itself before any UI appears",
+    early.win && !early.overlay, JSON.stringify(early));
+  await ip.evaluate(() => window.__GW.step(120, 1 / 60));
+  await ip.waitForTimeout(200);
+  const won = await ip.evaluate(() => {
+    const g = window.__GW.game;
+    const card = document.querySelector("#winscreen .card").getBoundingClientRect();
+    // the sheet must not sit over the mechanism it is congratulating
+    const parts = g.tile_list.filter((t) => t.anchored)
+      .map((t) => g.camPanY + g.zoom * (g.H - t.pos[1]));
+    return {
+      win: g.win,
+      overlay: document.getElementById("winscreen").classList.contains("on"),
+      next: !!document.querySelector('#win-acts .btn[data-id="next"]'),
+      clear: parts.every((y) => y < card.top - 8),
+      framed: Math.abs(g.zoom - 1) > 1e-3 || Math.abs(g.camPanX) > 1 || Math.abs(g.camPanY) > 1,
+    };
+  });
+  check("completion sheet appears with a Next Level action", won.overlay && won.next, JSON.stringify(won));
+  check("the completion sheet leaves the built mechanism fully visible", won.clear, JSON.stringify(won));
+  check("the camera frames the solved mechanism", won.framed, JSON.stringify(won));
 
   // 7. and Next Level advances
   if (won.next) {
@@ -263,7 +413,7 @@ console.log("\ninteraction through the chrome layer");
 }
 
 // ------------------------------------------------------------------- baseline
-console.log("\nbehavioural baseline (presentation-only guard)");
+console.log("\nbehavioural baseline");
 const fingerprint = await page.evaluate(async (scenes) => {
   const out = {};
   const round = (v) => Math.round(v * 1e9) / 1e9;
