@@ -34,10 +34,10 @@ the anchored drive and target wheels are furniture, not budget.
 | 13 | Wind the Barrel | ★ mainspring | A mainspring is a store, not a motor. Drive it and it fills. | 2 | 3.5 |
 | 14 | Two Barrels | — | A barrel is a load like any other, and one motor can fill two. | 3 | 6.4 |
 | 15 | First Hand | ★ hand + dial | A wheel with a pointer on a dial is a hand. Give it the right rate. | 2 | 5.8 |
-| 16 | Twelve To One | — | The motion work: a pinion into a four, a pinion into a three, exactly twelve to one. | 3 | 9.4 |
-| 17 | The Going Train | — | Sub-assembly A: bring the barrel down to a tenth of its speed. | 3 | 7.7 |
-| 18 | The Dial Train | — | Sub-assembly B: the same twelve to one, now between two hands on two dials. | 3 | 9.4 |
-| 19 | Barrel To Hand | — | Sub-assembly C: fifteen barrel turns, one sweep of the minute hand. | 3 | 9.5 |
+| 16 | The Going Train | — | Sub-assembly one: bring the barrel down to a tenth of its speed. | 3 | 7.7 |
+| 17 | Twelve To One | — | The motion work: a pinion into a four, a pinion into a three, exactly twelve to one. | 3 | 9.4 |
+| 18 | Barrel To Hand | — | Sub-assembly two: fifteen barrel turns, one sweep of the minute hand — the clock's left half. | 3 | 9.5 |
+| 19 | The Dial Train | — | Sub-assembly three: both hands, both dials, twelve to one — the clock's right half. | 3 | 9.4 |
 | 20 | Gear Works | — | The clock. Barrel, going train, minute hand, motion work, hour hand. | 6 | 20.1 |
 
 New elements land at **3, 5, 9, 13, 15** — never in back-to-back levels, and never more
@@ -53,13 +53,17 @@ are a lens on the measurements, not a truth about the levels.
 
 ```
  1 ██                  8 ███████            15 ██████
- 2 █████               9 ██████             16 █████████
- 3 █████              10 ██████             17 ████████
+ 2 █████               9 ██████             16 ████████
+ 3 █████              10 ██████             17 █████████
  4 ██████             11 ███████████        18 █████████
  5 ████               12 ███████████████    19 █████████
  6 ████               13 ████               20 ████████████████████
  7 ███████            14 ██████
 ```
+
+Every step down in that shape is a mechanic arriving on a deliberately simple board.
+`curve.mjs` prints the three largest in each direction, and after the round-3 reorder they
+are 13 (−11.3), 5 (−1.4) and 9 (−1.3) — the spring, the ratio pair and the shared shaft.
 
 Four deliberate features, each of which would otherwise read as a defect:
 
@@ -70,9 +74,16 @@ Four deliberate features, each of which would otherwise read as a defect:
 * **The report's biggest step down is 13, and it is the point of 13.** After the mechanism
   peak at 12, the spring arrives on a deliberately simple board so the new idea is the
   only thing in the room. Introducing a mechanic on a hard level teaches neither.
-* **17–19 sit level, not rising.** They are the three thirds of the clock, each built
-  standalone, so that 20 is assembly rather than invention. The part count is flat; what
-  rises is how much of the finale the player has already held in their hands.
+* **16–19 rise gently, then 20 doubles.** They are the clock's two halves and the two
+  mechanisms behind them, each built standalone at three parts, so that the finale is
+  assembly rather than invention. The part count is flat across them; what rises is how
+  much of level 20 the player has already had in their hands. 20 itself is the only
+  double-digit step in the campaign, and it is the finale — it is the two sub-assemblies
+  joined, with the same wheels in the same sizes.
+* **Round 3 reordered this block** to get there. It used to run motion work, going train,
+  dials, barrel — which put the campaign's easiest late level at 17 and left a dip in the
+  middle of the run-up. Mechanism first (16, 17), then the same mechanisms wearing their
+  dials (18, 19), then both at once.
 
 ## The rules every level is held to
 

@@ -381,7 +381,8 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
   #tray{flex:0 0 auto;min-width:74px;min-height:52px;max-height:none;margin-top:0;padding:var(--sp-2) var(--sp-3)}
   #tray:not(.count) .s{display:none}
   #tray.count .s{font-size:var(--fs-body-sm)}
-  #hintbar{left:var(--sp-2);right:var(--sp-2);bottom:calc(var(--sp-2) + 68px);font-size:var(--fs-micro)}
+  /* clear of the dock: the dock is 52px of control plus its own padding */
+  #hintbar{left:var(--sp-2);right:var(--sp-2);bottom:calc(var(--sp-2) + 90px);font-size:var(--fs-micro)}
   #hintbar .h:nth-child(n+3){display:none}
   body[data-mode="free"] #rail,body[data-mode="puzzle"] #rail{transform:none}
   #title h1{font-size:var(--fs-display-sm)}
@@ -886,14 +887,6 @@ const LEVELS = [
                min_rpm: 8, max_rpm: 12 }],
     solution: [{ type: "U3", pos: [-2.5, 0] }, { type: "U1", pos: [-2.5, 0], stack: 0 }] },
 
-  { name: "Twelve To One",
-    hint: "The motion work: a pinion into a four, then a pinion into a three. Exactly twelve to one.",
-    inventory: ["U1", "U4", "U1"],
-    drives: [{ pos: [-2.25, 0], rpm: 36, type: "U3", id: "in" }],
-    driven: [{ pos: [2.25, 0], type: "U3", ratio: { of: "in", value: 1 / 12 } }],
-    solution: [{ type: "U1", pos: [-2.25, 0], stack: "in" },
-               { type: "U4", pos: [0.25, 0] }, { type: "U1", pos: [0.25, 0], stack: 1 }] },
-
   { name: "The Going Train",
     hint: "Sub-assembly one: bring the barrel down to a tenth of its speed.",
     inventory: ["U2", "U4", "U1"],
@@ -902,15 +895,13 @@ const LEVELS = [
     solution: [{ type: "U2", pos: [-4, 0] }, { type: "U4", pos: [-1, 0] },
                { type: "U1", pos: [-1, 0], stack: 1 }] },
 
-  { name: "The Dial Train",
-    hint: "Sub-assembly two: the hour hand turns once for every twelve of the minute hand.",
+  { name: "Twelve To One",
+    hint: "The motion work: a pinion into a four, then a pinion into a three. Exactly twelve to one.",
     inventory: ["U1", "U4", "U1"],
-    drives: [{ pos: [-2.25, 0.5], rpm: -18, type: "U3", id: "minute",
-               hand: "minute", dial: "MINUTES" }],
-    driven: [{ pos: [2.25, 0.5], type: "U3", hand: "hour", dial: "HOURS",
-               ratio: { of: "minute", value: 1 / 12 } }],
-    solution: [{ type: "U1", pos: [-2.25, 0.5], stack: "minute" },
-               { type: "U4", pos: [0.25, 0.5] }, { type: "U1", pos: [0.25, 0.5], stack: 1 }] },
+    drives: [{ pos: [-2.25, 0], rpm: 36, type: "U3", id: "in" }],
+    driven: [{ pos: [2.25, 0], type: "U3", ratio: { of: "in", value: 1 / 12 } }],
+    solution: [{ type: "U1", pos: [-2.25, 0], stack: "in" },
+               { type: "U4", pos: [0.25, 0] }, { type: "U1", pos: [0.25, 0], stack: 1 }] },
 
   { name: "Barrel To Hand",
     hint: "Sub-assembly three: fifteen barrel turns, one sweep of the minute hand.",
@@ -921,6 +912,16 @@ const LEVELS = [
     solution: [{ type: "U1", pos: [-3.4, -0.6], stack: "barrel" },
                { type: "U5", pos: [-0.581, 0.426] },
                { type: "U1", pos: [-0.581, 0.426], stack: 1 }] },
+
+  { name: "The Dial Train",
+    hint: "Sub-assembly two: the hour hand turns once for every twelve of the minute hand.",
+    inventory: ["U1", "U4", "U1"],
+    drives: [{ pos: [-2.25, 0.5], rpm: -18, type: "U3", id: "minute",
+               hand: "minute", dial: "MINUTES" }],
+    driven: [{ pos: [2.25, 0.5], type: "U3", hand: "hour", dial: "HOURS",
+               ratio: { of: "minute", value: 1 / 12 } }],
+    solution: [{ type: "U1", pos: [-2.25, 0.5], stack: "minute" },
+               { type: "U4", pos: [0.25, 0.5] }, { type: "U1", pos: [0.25, 0.5], stack: 1 }] },
 
   { name: "Gear Works",
     hint: "The clock. Barrel to minute hand, fifteen to one; minute hand to hour hand, twelve to one.",
@@ -1874,7 +1875,18 @@ class Game {
     let gap = STAGE_GAP;
     const width = (g) => rs.reduce((a, r) => a + 2 * r, 0) + g * (rs.length - 1);
     if (width(gap) > span) gap = Math.max(0.06, (span - width(0)) / Math.max(1, rs.length - 1));
-    const y = LEVEL_BOX.bottom + maxR + 0.15;
+    // The row sits just under the machine rather than pinned to the bottom of the
+    // box: on a sparse level that turns a screen of empty arena into a short drag,
+    // and the camera frames both together so nothing is lost by moving it up.
+    let low = 1e9;
+    for (const t of this.tile_list) {
+      if (!t.anchored) continue;
+      const e = (t.dial ? this._dial_r(t) : t.pitch_r() * 1.30) / U;
+      low = Math.min(low, (t.pos[1] - this.origin[1]) / U - e);
+    }
+    // 1.45 clears the goal tag that hangs under a target, not just the target.
+    const y = low < 1e8 ? Math.max(LEVEL_BOX.bottom + maxR + 0.15, low - 1.45 - maxR)
+                        : LEVEL_BOX.bottom + maxR + 0.15;
     let x = -width(gap) / 2;
     tiles.forEach((t, i) => {
       x += rs[i];

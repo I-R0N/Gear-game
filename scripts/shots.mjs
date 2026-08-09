@@ -44,7 +44,7 @@ if (mode === "levels") {
 
       await page.evaluate((i) => { window.__GW.game.start_level(i); }, i);
       await page.evaluate(() => window.__GW.step(30, 1 / 60));
-      await page.waitForTimeout(520);
+      await page.waitForTimeout(820);   // the previous level's sheet must be fully gone
       await page.evaluate(() => window.__GW.step(2, 1 / 60));
       let out = path.join(outDir, `${tag}-start-${vp.name}.png`);
       await page.screenshot({ path: out });
