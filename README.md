@@ -24,8 +24,15 @@ Each pull request gets a sticky comment with its own link, re-pointed on every p
 a pull request closes, its directory is deleted from the site. Both live on a single
 `gh-pages` branch in separate directories, so a preview can never overwrite `main`.
 
-Pull requests **from forks** do not get a preview — GitHub gives those runs a read-only
-token, so they cannot publish. The workflow skips them rather than failing.
+**Nothing is published until `npm test` passes.** The workflow runs the suite first and
+only deploys behind a green run, so a preview link always points at a build whose levels
+still solve and whose physics fingerprint is intact. A failing suite leaves the previous
+preview in place rather than replacing it with a broken one. Cleaning up a closed pull
+request skips the gate — there is nothing to verify when only deleting a directory.
+
+Pull requests **from forks** still run the test suite, but do not get a preview — GitHub
+gives those runs a read-only token, so they cannot publish. The workflow skips the deploy
+rather than failing.
 
 ### One-time setup
 

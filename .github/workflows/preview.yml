@@ -6,6 +6,9 @@
 # Everything lives on one `gh-pages` branch, each target in its own directory,
 # so a PR preview never clobbers main. Closing a PR removes its directory.
 #
+# Nothing is published until `npm test` passes, so a preview link always points
+# at a build whose levels still solve and whose physics fingerprint is intact.
+#
 # One-time setup: Settings -> Pages -> Source = "Deploy from a branch",
 # branch `gh-pages`, folder `/ (root)`.
 name: Preview
@@ -26,11 +29,48 @@ permissions:
   pull-requests: write
 
 jobs:
+  # The gate. Runs for forks too — they get test feedback even though they
+  # cannot publish. Skipped when a pull request closes, since that path only
+  # deletes a directory and there is nothing to verify.
+  test:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Level solvability, mesh/dynamics invariants, real-mouse interaction, and
+      # the physics fingerprint that keeps presentation changes presentation-only.
+      - name: npm test
+        run: npm test
+
   preview:
+    needs: test
+    # Publish only behind a green suite. `always()` is needed so the job still
+    # runs when `test` was skipped (a closing pull request, which just cleans
+    # up) — a failed or cancelled `test` still blocks it.
     # A pull request from a fork gets a read-only token and cannot publish.
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      always() &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       # For an open PR this is the merge result, which is what a reviewer
