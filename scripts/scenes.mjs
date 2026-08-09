@@ -54,15 +54,20 @@ export const SCENES = {
       // hub of the readout cluster rather than leaving a dead part in frame
       const hub = g.tile_list.find((t) => t.label === "U3");
 
+      // The lone U3 the starter board drops sits exactly where the compound stack
+      // wants to go, so move it to its cluster FIRST. Otherwise the U5's placement
+      // depends on how the seating rule resolves a rejected drop, which makes this
+      // scene's fingerprint hostage to a rule that has nothing to do with it.
+      hub.pos = [cx - s * 1.0, cy - s * 5.6];
+      hub.is_driver = true;
+
       // --- compound reduction: big + small on one shaft, driving an output gear ---
       const u5 = S.put("U5", [idler.pos[0] + S.tangent(idler.pitch_r(), S.rp("U5")), idler.pos[1]]);
       const topGear = S.put("U2", [u5.pos[0], u5.pos[1]]);
       g._stack_on(topGear, u5);
       S.put("U3", [topGear.pos[0] + S.tangent(topGear.pitch_r(), S.rp("U3")), topGear.pos[1]]);
 
-      // --- readout-dense cluster: its own motor, six planets around a hub ---
-      hub.pos = [cx - s * 1.0, cy - s * 5.6];
-      hub.is_driver = true;
+      // --- readout-dense cluster: six planets around that hub ---
       const d = S.tangent(hub.pitch_r(), S.rp("U2"));
       for (const deg of [90, 150, 210, 270, 330, 30]) {
         const a = (deg * Math.PI) / 180;

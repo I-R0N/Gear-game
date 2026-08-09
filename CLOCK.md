@@ -13,8 +13,8 @@ page, not reasoned about on paper.
 ## The decision, up front
 
 **Option (a): a clock WITHOUT an escapement.** Power comes from a constant-rate *barrel
-arbor* — an anchored drive turning at 5 rpm — standing in for a mainspring whose escapement
-is already doing its job off-stage. The player builds the **going train** from the barrel to
+arbor* — an anchored drive turning at 60 rpm — standing in for a mainspring whose
+escapement is already doing its job off-stage. The player builds the **going train** from the barrel to
 the minute hand and the **12:1 motion work** from the minute hand to the hour hand.
 
 Option (b) is not attempted. A real escapement needs intermittent engagement, and
@@ -110,7 +110,15 @@ The engine already models this properly: `_overlaps` skips any gear with a `part
 and `_build_mesh_edges` only ever cares about tangency, so no spurious mesh appears. The
 spike render confirms it reads as a layered machine rather than a collision — the
 lightening holes and the stacked gear's central window are doing the work DESIGN.md says
-they are for. Campaign levels set `z` by pitch radius descending, so big wheels sit behind.
+they are for. Campaign levels set `z` by pitch radius descending, so big wheels sit
+behind, and a wheel wearing a dial sits in front of everything.
+
+The rule the engine enforces had to change to allow this, and the change is not cosmetic.
+`_overlaps` originally refused any placement whose pitch circles crossed, which makes every
+compound train unbuildable by hand — the wheel a pinion drives always lands inside the
+previous wheel's footprint. Seating now refuses only a drop that lands inside another
+gear's stack-capture radius, which is the ambiguous case stacking already handles.
+Spawning a part out of the tray still keeps full clearance, so the bench stays tidy.
 
 Neither rule can be left to authoring discipline across twenty levels, so both are
 enforced by the harness: every level's solution spec asserts that the solved board's mesh
@@ -137,8 +145,10 @@ accident. `scripts/test.mjs` re-derives this box at both viewports on every run 
 every part of every level — placed *and* staged — lies inside it, so the number above can
 never quietly rot.
 
-Levels are authored to a tighter box, **|x| ≤ 8.0 and −6.6 ≤ y ≤ 7.0**, leaving the strip
-below `y = −7.0` for the inventory staging row.
+`LEVEL_BOX` in the source is the authoring box the game itself uses — x ±10.6,
+y ∈ [−10.0, 9.5] — and the suite asserts that box is inside the measured one. Level content
+is authored well inside it, |x| ≤ 8 and y ∈ [−4, 6.5], because the strip along the bottom
+is the deterministic inventory staging row and the camera frames both together.
 
 ---
 
@@ -162,23 +172,29 @@ deciding whether the clock is right is not, and the two are not allowed to touch
 ### The mechanism, level 20
 
 ```
-  barrel arbor            going train              motion work
-  (anchored drive)   →    (player builds)     →    (player builds)    →   hour hand
-   U3, 5 rpm              …  → minute wheel        U1 pinion on the
-   "the escapement is        U4 + MINUTES dial     minute arbor → U4
-    already regulating                             → U1 pinion → U3
-    this"                                          hour wheel + HOURS dial
+  barrel arbor        going train, 1:15        motion work, 1:12
+  (anchored drive)  → U1 pinion on the     →   U1 pinion on the     →  hour hand
+   U2, 60 rpm          barrel arbor            minute arbor            U3 + HOURS dial
+   "the escapement     → U5 wheel               → U4 wheel
+    is already         → U1 pinion              → U1 pinion
+    regulating this"   → minute hand
+                         U3 + MINUTES dial
 ```
 
-* The barrel is anchored and drives at a constant 5 rpm — slow enough that the hands are
-  watchable rather than a blur, fast enough that the reveal does not need patience.
-* The minute hand is a `U4` carrying the `MINUTES` dial. The hour hand is a `U3` carrying
-  the `HOURS` dial.
-* Two separate dials, side by side, is a **regulator** layout — which is a real clock face,
-  not a compromise. Concentric hands are genuinely impossible here: shaft partners share
+* The barrel is anchored and drives at a constant 60 rpm, which puts the minute hand at
+  one sweep a minute and the hour hand at 2°/s — slow enough to read as an hour hand,
+  fast enough that you can see it move while you watch.
+* Both hands are `U3`. That is a legibility constraint, not an arbitrary one: the two
+  arbors are fixed 4.35 Rp2 apart by the motion work's own geometry, and two dials have to
+  fit side by side inside that. A `U5` minute hand — which is what the going train wanted
+  — makes a face that overlaps its neighbour.
+* Two dials side by side is a **regulator** layout, which is a real clock face rather than
+  a compromise. Concentric hands are genuinely impossible here: shaft partners share
   `omega` by definition, and 12:1 hands do not.
-* Win condition: both hands turning, **and** `hour = minute / 12` within tolerance. Placing
-  the parts in some other arrangement that happens to spin both hands does not pass.
+* Win condition: both hands turning, **and** `minute = barrel/15`, **and**
+  `hour = minute/12`. An arrangement that happens to spin both hands does not pass.
+* Level 19 builds the left half of that diagram and level 18 the right half, with the same
+  wheels in the same sizes, so the finale is assembly rather than invention.
 
 ### What was cut, and why
 

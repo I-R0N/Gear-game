@@ -423,10 +423,12 @@ body[data-mode="puzzle"] #rail .group,body[data-mode="puzzle"] #rail #tray,body[
   to{opacity:1;transform:none}
 }
 #winscreen.on .seal{animation:sealIn 520ms var(--ease-out) both}
+/* The sheet rises as one piece. A per-button staggered animation used to live
+   here and it was a bug: the buttons are created in the same frame the sheet is
+   revealed, and the animation sat in its delay phase holding `from` (opacity 0)
+   instead of running — the actions were invisible but still clickable, which is
+   the worst of both. The card's own entrance is the whole effect now. */
 #winscreen .acts .btn{transition-delay:0ms}
-#winscreen.on .acts .btn:nth-child(1){animation:riseIn 380ms var(--ease-out) 120ms both}
-#winscreen.on .acts .btn:nth-child(2){animation:riseIn 380ms var(--ease-out) 190ms both}
-@keyframes riseIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 /* the sheet seats upward from the bottom edge, like a drawer, not a fading card */
 #winscreen .stack > *{transform:translateY(20px)}
 /* the hint strip steps out of the way rather than being covered by the sheet */
@@ -722,6 +724,11 @@ const GAME_TITLE = "GEAR WORKS";
 const WIN_SPIN_EPS = 1e-2;
 // Seconds of simulation between solving a level and any UI appearing over it.
 const WIN_REVEAL_DELAY = 0.85;
+// Chrome geometry, mirrored from the stylesheet so the camera can work out which
+// part of the screen is free without waiting on the DOM to measure itself.
+const CHROME_BREAKPOINT = 760;   // the one media query
+const RAIL_W_PX = 176;           // --rail-w
+const DOCK_H_PX = 76;            // the mobile dock, plus its inset
 
 // The authoring box for level content, in units of Rp2 from the arena centre.
 // Derived in CLOCK.md from _recompute_geometry plus the measured chrome rects at
@@ -872,11 +879,11 @@ const LEVELS = [
                { type: "U2", pos: [0, 0] }] },
 
   { name: "First Hand",
-    hint: "A wheel with a pointer on a dial is a hand. This one wants one turn every ten seconds.",
+    hint: "A wheel with a pointer on a dial is a hand. Bring this one down to about ten turns a minute.",
     inventory: ["U3", "U1"],
     drives: [{ pos: [-5, 0], rpm: -45, type: "U2" }],
-    driven: [{ pos: [0.5, 0], type: "U5", hand: "minute", dial: "MINUTES",
-               min_rpm: 5, max_rpm: 7 }],
+    driven: [{ pos: [-0.5, 0], type: "U3", hand: "minute", dial: "MINUTES",
+               min_rpm: 8, max_rpm: 12 }],
     solution: [{ type: "U3", pos: [-2.5, 0] }, { type: "U1", pos: [-2.5, 0], stack: 0 }] },
 
   { name: "Twelve To One",
@@ -907,28 +914,28 @@ const LEVELS = [
 
   { name: "Barrel To Hand",
     hint: "Sub-assembly three: fifteen barrel turns, one sweep of the minute hand.",
-    inventory: ["U1", "U3", "U1"],
-    drives: [{ pos: [-4, -1.6], rpm: -60, type: "U2", id: "barrel" }],
-    driven: [{ pos: [0.721, -0.861], type: "U5", hand: "minute", dial: "MINUTES",
+    inventory: ["U1", "U5", "U1"],
+    drives: [{ pos: [-3.4, -0.6], rpm: -60, type: "U2", id: "barrel" }],
+    driven: [{ pos: [1.232, -0.419], type: "U3", hand: "minute", dial: "MINUTES",
                ratio: { of: "barrel", value: 1 / 15 } }],
-    solution: [{ type: "U1", pos: [-4, -1.6], stack: "barrel" },
-               { type: "U3", pos: [-2.268, -0.6] },
-               { type: "U1", pos: [-2.268, -0.6], stack: 1 }] },
+    solution: [{ type: "U1", pos: [-3.4, -0.6], stack: "barrel" },
+               { type: "U5", pos: [-0.581, 0.426] },
+               { type: "U1", pos: [-0.581, 0.426], stack: 1 }] },
 
   { name: "Gear Works",
     hint: "The clock. Barrel to minute hand, fifteen to one; minute hand to hour hand, twelve to one.",
-    inventory: ["U1", "U3", "U1", "U1", "U4", "U1"],
-    drives: [{ pos: [-5.6, 2.6], rpm: -60, type: "U2", id: "barrel" }],
-    driven: [{ pos: [-1.781, -0.158], type: "U5", id: "minute",
+    inventory: ["U1", "U5", "U1", "U1", "U4", "U1"],
+    drives: [{ pos: [-5.266, 2.445], rpm: -60, type: "U2", id: "barrel" }],
+    driven: [{ pos: [-1.7, -1], type: "U3", id: "minute",
                hand: "minute", dial: "MINUTES", ratio: { of: "barrel", value: 1 / 15 } },
-             { pos: [1.905, 2.423], type: "U3",
+             { pos: [2.647, -0.871], type: "U3",
                hand: "hour", dial: "HOURS", ratio: { of: "minute", value: 1 / 12 } }],
-    solution: [{ type: "U1", pos: [-5.6, 2.6], stack: "barrel" },
-               { type: "U3", pos: [-4.6, 0.868] },
-               { type: "U1", pos: [-4.6, 0.868], stack: 1 },
-               { type: "U1", pos: [-1.781, -0.158], stack: "minute" },
-               { type: "U4", pos: [0.267, 1.276] },
-               { type: "U1", pos: [0.267, 1.276], stack: 4 }] },
+    solution: [{ type: "U1", pos: [-5.266, 2.445], stack: "barrel" },
+               { type: "U5", pos: [-3.338, 0.147] },
+               { type: "U1", pos: [-3.338, 0.147], stack: 1 },
+               { type: "U1", pos: [-1.7, -1], stack: "minute" },
+               { type: "U4", pos: [0.715, -0.353] },
+               { type: "U1", pos: [0.715, -0.353], stack: 4 }] },
 ];
 
 // ============================================================
@@ -1460,8 +1467,15 @@ class TileBase {
   // Text lines for this gear's floating readout (null = don't show one).
   readout_lines() {
     if (this.on_shaft_top === false && this.partner) return null;   // base of a stack: top shows it
+    if (this.staged) return null;          // an unplaced part has nothing to report
+    // A hand's readout is the dial it is on — and that goes for the whole shaft,
+    // or the pinion riding the hand's arbor reports for it.
+    if (this.hand || (this.partner && this.partner.hand)) return null;
     const rpmV = omega_to_rpm(this.omega);
-    const rpm = (Math.abs(rpmV) < 0.05 ? 0 : rpmV).toFixed(0) + " rpm";
+    // A going train runs at fractions of an rpm, where rounding to whole numbers
+    // prints "-0". Below 10 rpm the reading carries a decimal instead.
+    const rpm = (Math.abs(rpmV) < 0.05 ? "0"
+                 : Math.abs(rpmV) < 9.95 ? rpmV.toFixed(1) : rpmV.toFixed(0)) + " rpm";
     return [rpm, fmt_torque(this.torque)];
   }
   // Screen-up radius: how far above the centre the gear body reaches.
@@ -1881,8 +1895,12 @@ class Game {
     }
     for (const v of lv.driven) this._add_anchor(v, false);
     // Big wheels sit behind small ones: a compound reduction genuinely overlaps in
-    // plan view (see CLOCK.md), and this is what keeps it readable.
-    this.tile_list.forEach(t => { t.z = 40 - t.pitch_r() / this.Rp2; });
+    // plan view (see CLOCK.md), and this is what keeps it readable. A wheel wearing
+    // a dial goes in front of everything the player will pile on top of it —
+    // otherwise the motion work buries the clock face it exists to drive.
+    this.tile_list.forEach(t => {
+      t.z = (t.dial ? 300 : 40) - t.pitch_r() / this.Rp2;
+    });
 
     this._drop_inventory(lv.inventory || []);   // stage the player's gears
 
@@ -1890,6 +1908,7 @@ class Game {
     this.menu.layout(this.W, this.H);
     this._win_at = null;
     this._mark_dirty(); this._ensure_rebuilt();
+    this._frame_level();
   }
   _placed_count() { let n = 0; for (const t of this.tile_list) if (!t.anchored) n++; return n; }
   // Is one target's goal met? Every level's win condition goes through here, and
@@ -1913,13 +1932,13 @@ class Game {
   }
   // One line of plain English per target, for the objective panel and the tag the
   // target wears on the board. Written once so the two can never disagree.
-  target_goal_text(t) {
+  target_goal_text(t, short) {
     const s = t.spec || {};
     if (s.wind_turns !== undefined) return "WIND TO " + s.wind_turns;
     if (s.ratio) {
       const a = Math.abs(s.ratio.value);
       const ref = this._anchor(s.ratio.of);
-      const of = " " + ((ref && (ref.dial || (ref.role === "drive" ? "DRIVE" : "TARGET"))) || "DRIVE");
+      const of = short ? "" : " " + ((ref && (ref.dial || (ref.role === "drive" ? "DRIVE" : "TARGET"))) || "DRIVE");
       // Sign is carried by the arrow on the part, not by a word: the arrow cannot
       // be read backwards and "clockwise" can.
       return (a >= 1 ? (Math.round(a * 10) / 10) + "×" : "1 : " + Math.round(1 / a)) + of;
@@ -1969,18 +1988,57 @@ class Game {
     if (!parts.length) return;
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
     for (const t of parts) {
-      const r = (t.dial ? this._dial_r(t) + 14 : t.pitch_r() * 1.30 + 22);
+      const pill = (t.anchored ? this.step * 0.55 : 0);
+      const r = pill + (t.dial ? this._dial_r(t) + this.step * 0.38
+                               : t.pitch_r() * 1.30 + this.step * 0.30);
       x0 = Math.min(x0, t.pos[0] - r); x1 = Math.max(x1, t.pos[0] + r);
       y0 = Math.min(y0, t.pos[1] - r); y1 = Math.max(y1, t.pos[1] + r);
     }
-    const m = this.menu, dock = m.w >= this.W * 0.5;   // mobile dock vs desktop rail
-    const L = dock ? 16 : m.x + m.w + 24, R = this.W - 16, TOP = 68;
-    const chromeBottom = dock ? this.H - (m.y + m.h) - 12 : this.H - 12;
-    const BOT = chromeBottom - (dock ? 182 : 116);     // room for the completion sheet
-    const sw = Math.max(120, R - L), sh = Math.max(120, BOT - TOP);
-    const z = clampf(Math.min(sw / Math.max(1, x1 - x0), sh / Math.max(1, y1 - y0)) * 0.96, 0.5, 1.8);
+    const b = this._screen_box(true);                  // room for the completion sheet
+    const z = clampf(Math.min((b.x1 - b.x0) / Math.max(1, x1 - x0),
+                              (b.y1 - b.y0) / Math.max(1, y1 - y0)) * 0.96, 0.5, 1.8);
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    this._cam_to = { zoom: z, panX: (L + R) / 2 - z * cx, panY: (TOP + BOT) / 2 - z * (this.H - cy) };
+    this._cam_to = { zoom: z, panX: (b.x0 + b.x1) / 2 - z * cx,
+                     panY: (b.y0 + b.y1) / 2 - z * (this.H - cy) };
+  }
+  // The whole board — machine and staging row — fitted to the screen when the level
+  // opens. Without it a two-gear level is a pair of specks in a mostly empty arena
+  // at 1280x800, and a wide one runs off the edge at 390px.
+  _frame_level() {
+    const parts = this.tile_list;
+    if (!parts.length) return;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const t of parts) {
+      // Readout pills float above a part; leave them a little headroom so the
+      // frame does not end flush with the gear they annotate.
+      const pill = (t.anchored ? this.step * 0.55 : 0);
+      const r = pill + (t.dial ? this._dial_r(t) + this.step * 0.42
+                               : t.pitch_r() * 1.30 + this.step * 0.34);
+      x0 = Math.min(x0, t.pos[0] - r); x1 = Math.max(x1, t.pos[0] + r);
+      y0 = Math.min(y0, t.pos[1] - r); y1 = Math.max(y1, t.pos[1] + r);
+    }
+    const b = this._screen_box(false);
+    const z = clampf(Math.min((b.x1 - b.x0) / Math.max(1, x1 - x0),
+                              (b.y1 - b.y0) / Math.max(1, y1 - y0)) * 0.96, 0.5, 1.6);
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    this.zoom = z;
+    this.camPanX = (b.x0 + b.x1) / 2 - z * cx;
+    this.camPanY = (b.y0 + b.y1) / 2 - z * (this.H - cy);
+    this._cam_to = null;
+  }
+  // The screen rectangle the chrome is NOT using, in CSS px (y-down).
+  //
+  // Derived from the layout breakpoint rather than from the rail's published rect:
+  // that rect is a fallback until the chrome has measured itself, and the order in
+  // which update and render interleave is not something the camera should depend
+  // on. These four numbers mirror the stylesheet, the way DESIGN.md's tokens do.
+  _screen_box(reserveSheet) {
+    const dock = this.W <= CHROME_BREAKPOINT;          // mobile dock vs desktop rail
+    const x0 = dock ? 16 : RAIL_W_PX + 28, x1 = this.W - 16;
+    const y0 = dock ? 64 : 68;
+    const chromeBottom = dock ? this.H - DOCK_H_PX - 20 : this.H - 44;
+    const y1 = chromeBottom - (reserveSheet ? (dock ? 170 : 104) : 0);
+    return { x0, x1, y0, y1: Math.max(y0 + 120, y1) };
   }
   // The completion UI waits a beat so the reveal is the machine, not a panel.
   // Driven by the simulation clock, not wall time, so a headless run sees the same
@@ -2065,24 +2123,32 @@ class Game {
   // them). Puzzle inventory staging still keeps its scattered pieces on-screen.
   is_pos_safe(x, y) { return this.mode !== "puzzle" || this._in_view(x, y); }
   _in_view(x, y) { const m = this.safe_margin; return x >= m && x <= this.W - m && y >= m && y <= this.H - m; }
-  // Would a gear of pitch rp at pos overlap any existing gear?
+  // Would a gear of pitch rp at pos collide with an existing gear? Two answers,
+  // because seating and spawning want different ones.
   //
-  // "Overlap" here is deliberately NOT "the pitch circles cross". A compound
-  // reduction genuinely overlaps in plan view — the pinion is smaller than its
-  // wheel, so the next wheel always sits inside the previous wheel's footprint —
-  // and refusing those placements makes every compound train unbuildable. Real
-  // trains solve it by stacking axially, which is exactly what a shared shaft is.
+  //   "seat"  — where the player (or a level) is putting a gear ON PURPOSE.
+  //     A compound reduction genuinely overlaps in plan view: the pinion is
+  //     smaller than its wheel, so the next wheel always lands inside the previous
+  //     wheel's footprint, and when the pinion is a U1 the next wheel's centre can
+  //     sit well inside it. Real trains solve this by stacking axially, which is
+  //     exactly what a shared shaft is here. Refusing those placements makes every
+  //     compound train unbuildable, so seating only refuses a drop that lands
+  //     inside another gear's STACK-CAPTURE radius — and a drop there is a
+  //     stacking gesture, which `_stack_target` handles (0.6 * pitch_r) before
+  //     this is ever consulted. There is deliberately no gap between the two.
   //
-  // The rule is instead: a centre may not come inside another gear's pitch circle.
-  // That still stops a gear being dropped on top of another (the ambiguous case
-  // stacking is for) while letting layered wheels sit where they physically sit.
-  _overlaps(pos, rp, ignore) {
+  //   "spawn" — where the game is choosing a spot for the player, out of the
+  //     parts tray. Nothing is intended there yet, so it keeps full pitch-circle
+  //     clearance and a new part never lands on the pile.
+  _overlaps(pos, rp, ignore, mode) {
+    const spawn = mode === "spawn";
     for (const t of this.tile_list) {
       if (t === ignore || (ignore && t === ignore.partner)) continue;
       if (t.is_rack() || t.is_ring()) continue; // bars and rings don't block a gear
       if (t.partner) continue;   // shaft gears sit in their own plane — don't block nesting
-      const d = dist(pos, t.pos), ro = t.pitch_r();
-      if (d < Math.max(rp, ro) - this.mesh_tol*1.5) return true;
+      const d = dist(pos, t.pos);
+      const min = spawn ? rp + t.pitch_r() - this.mesh_tol*1.5 : t.pitch_r() * 0.55;
+      if (d < min) return true;
     }
     return false;
   }
@@ -2216,13 +2282,14 @@ class Game {
     t.pos = drop.slice();
   }
   _place_free(t, pos) {
-    // Put a gear near pos without overlapping (spiral out if needed).
+    // Put a gear near pos with full clearance (spiral out if needed): this is the
+    // game choosing a spot, so it keeps the bench tidy.
     const rp = t.pitch_r();
-    if (!this._overlaps(pos, rp, t) && this.is_pos_safe(pos[0], pos[1])) { t.pos = pos.slice(); return; }
+    if (!this._overlaps(pos, rp, t, "spawn") && this.is_pos_safe(pos[0], pos[1])) { t.pos = pos.slice(); return; }
     for (let r = this.step*0.6; r < this.step*30; r += this.step*0.5)
       for (let a = 0; a < TAU; a += Math.PI/8) {
         const p = [pos[0] + r*Math.cos(a), pos[1] + r*Math.sin(a)];
-        if (!this._overlaps(p, rp, t) && this.is_pos_safe(p[0], p[1])) { t.pos = p; return; }
+        if (!this._overlaps(p, rp, t, "spawn") && this.is_pos_safe(p[0], p[1])) { t.pos = p; return; }
       }
     t.pos = pos.slice();
   }
@@ -2774,14 +2841,20 @@ class Game {
       ctx.strokeStyle = ca(T.edgeHi, 0.30); ctx.lineWidth = 1 / this.zoom; ctx.stroke();
     }
 
-    if (this.mode === "puzzle") this._draw_dials();
     this.draw_pitch_circles();
     this.draw_mesh_lines();
     _zBuf.length = 0;
     for (const t of this.tile_list) _zBuf.push(t);
     _zBuf.sort(_byZ);
-    for (const t of _zBuf) t.draw();
-    if (this.mode === "puzzle") { this._draw_hands(); this._draw_roles(); }
+    // A dial belongs to its wheel, so it is drawn immediately under that wheel
+    // rather than behind the whole board — otherwise the going train's big wheels,
+    // which a compound reduction necessarily overlaps it with, sit on the face.
+    for (const t of _zBuf) { if (t.dial) this._draw_dial(t); t.draw(); }
+    if (this.mode === "puzzle") {
+      this._draw_hands();
+      for (const t of _zBuf) if (t.dial) this._draw_dial_label(t);
+      this._draw_roles();
+    }
     this._draw_links();
     this._draw_flashes();
     this._draw_selected_highlight();
@@ -2806,11 +2879,10 @@ class Game {
   // A dial is a rendering mode on a gear, not a part: a recessed plate with hour
   // marks and minute ticks, drawn BEHIND the wheel so the wheel still reads as the
   // wheel. It adds no node, no edge, no inertia and no ratio — see CLOCK.md.
-  _dial_r(t) { return t.pitch_r() * 1.10 + 4; }
-  _draw_dials() {
+  _dial_r(t) { return t.pitch_r() * 1.24 + 5; }
+  _draw_dial(t) {
     const ctx = G.ctx;
-    for (const t of this.tile_list) {
-      if (!t.dial) continue;
+    {
       const R = this._dial_r(t);
       ctx.save();
       ctx.translate(t.pos[0], G.fy(t.pos[1]));
@@ -2831,10 +2903,17 @@ class Game {
         ctx.stroke();
       }
       ctx.restore();
-      G.label(t.dial, t.pos[0], t.pos[1] - R - 11,
-              { size: 9, weight: 600, align: "center", track: T.trackLabel,
-                color: T.ink3, alpha: 0.95 });
     }
+  }
+  // The dial's caption carries the goal, so a hand needs no separate tag hanging
+  // off it: "HOURS · 1:12 MINUTES" is one instrument label, not two annotations.
+  _draw_dial_label(t) {
+    const R = this._dial_r(t);
+    let txt = t.dial, col = T.ink3;
+    if (t.role === "driven" && this.target_ok(t)) col = T.green;
+    G.label(txt, t.pos[0], t.pos[1] + R + 6,
+            { size: 9, weight: 600, align: "center", track: T.trackLabel,
+              color: col, alpha: 0.95 });
   }
   // The pointer itself, on top of the wheel, at the wheel's own angle. A hand is a
   // readout, so it stays in ink rather than spending one of the two signal colours.
@@ -2842,8 +2921,10 @@ class Game {
     const ctx = G.ctx;
     for (const t of this.tile_list) {
       if (!t.hand) continue;
-      const R = t.pitch_r(), hour = t.hand === "hour";
-      const len = R * (hour ? 0.66 : 0.94), tail = R * 0.20, w = hour ? 4.2 : 3.0;
+      const R = this._dial_r(t), hour = t.hand === "hour";
+      // A hand reaches out over the dial, past the wheel's own teeth. Inside the
+      // tooth ring it reads as a spoke; outside it reads as a hand.
+      const len = R * (hour ? 0.62 : 0.88), tail = R * 0.15, w = hour ? 5.0 : 3.4;
       ctx.save();
       ctx.translate(t.pos[0], G.fy(t.pos[1]));
       ctx.rotate(-t.angle);                        // canvas y is flipped
@@ -2856,7 +2937,7 @@ class Game {
       ctx.fillStyle = T.ink; ctx.fill();
       ctx.restore();
       ctx.beginPath();
-      ctx.arc(t.pos[0], G.fy(t.pos[1]), Math.max(3, R * 0.11), 0, TAU);
+      ctx.arc(t.pos[0], G.fy(t.pos[1]), Math.max(3, t.pitch_r() * 0.13), 0, TAU);
       ctx.fillStyle = T.amber; ctx.fill();
       ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.lineWidth = 1.2; ctx.stroke();
     }
@@ -2901,28 +2982,37 @@ class Game {
           if (ok) this.flash(t.pos[0], t.pos[1], t.pitch_r() * 2.4, T.green);
         }
         const col = ok ? T.green : T.ink2;
+        // Role rings clear the dial rather than being drawn across it: a dial is
+        // already a ring, and two concentric rings read as neither.
+        const rr = t.dial ? this._dial_r(t) + 2.5 : t.pitch_r() * 1.30;
         if (ok) {
-          G.ring(t.pos[0], t.pos[1], t.pitch_r() * 1.30, col, 0.9, 2);
-          G.ring(t.pos[0], t.pos[1], t.pitch_r() * 1.30, col, 0.16, 7);
+          G.ring(t.pos[0], t.pos[1], rr, col, t.dial ? 0.7 : 0.9, 2);
+          if (!t.dial) G.ring(t.pos[0], t.pos[1], rr, col, 0.16, 7);
         } else {
-          G.dashRing(t.pos[0], t.pos[1], t.pitch_r() * 1.30, col, 0.55, 2, 4, 7, 0);
+          G.dashRing(t.pos[0], t.pos[1], rr, col, 0.55, 2, 4, 7, 0);
         }
         // The goal, on the part it applies to — a level with three different
-        // targets should not need the player to look anywhere else.
-        this._draw_tag(t.pos[0], t.pos[1] - t.pitch_r() * 1.30 - 13,
-                       ok ? "✓ " + this.target_goal_text(t) : this.target_goal_text(t), col);
+        // targets should not need the player to look anywhere else. A dial says it
+        // in its own caption instead, so it does not get a second copy.
+        // On a dial the name is already engraved above it, so the tag underneath
+        // carries the short form — two subdials 4u apart cannot both wear a
+        // sentence at 390px.
+        this._draw_tag(t.pos[0], t.pos[1] - rr - 13,
+                       (ok ? "✓ " : "") + this.target_goal_text(t, !!t.dial), col);
         const s = t.spec || {};
         const wantSpin = s.spin !== undefined ? Math.sign(s.spin)
           : (s.ratio ? Math.sign(s.ratio.value) * Math.sign((this._anchor(s.ratio.of) || {}).omega || 1) : 0);
-        if (wantSpin) {
-          this._draw_spin_arrow(t.pos[0], t.pos[1], t.pitch_r() * 1.46, wantSpin, col, ok ? 0.9 : 0.7);
+        // The arrow is guidance. Once the goal is met it has nothing left to say,
+        // and on a finished clock four of them are just noise over the mechanism.
+        if (wantSpin && !ok) {
+          this._draw_spin_arrow(t.pos[0], t.pos[1], rr + t.pitch_r() * 0.16, wantSpin, col, 0.7);
         }
         if (s.wind_turns !== undefined) {
           const f = clampf(Math.abs(t.wind || 0) / (s.wind_turns * TAU), 0, 1);
-          G.ring(t.pos[0], t.pos[1], t.pitch_r() * 1.44, T.cyanDim, 0.5, 3);
+          G.ring(t.pos[0], t.pos[1], rr + 6, T.cyanDim, 0.5, 3);
           const ctx = G.ctx;
           ctx.beginPath();
-          ctx.arc(t.pos[0], G.fy(t.pos[1]), t.pitch_r() * 1.44,
+          ctx.arc(t.pos[0], G.fy(t.pos[1]), rr + 6,
                   -Math.PI / 2, -Math.PI / 2 + f * TAU);
           ctx.strokeStyle = ca(ok ? T.green : T.cyan, 0.95); ctx.lineWidth = 3;
           ctx.lineCap = "round"; ctx.stroke(); ctx.lineCap = "butt";
@@ -2950,6 +3040,24 @@ class Game {
   // and the whole thing is clamped to the visible band so nothing hides under the
   // top bar. Text never lands on metal; that is what the stem is for.
   _draw_readouts() {
+    // A part still sitting in the staging row is not part of any train yet, so it
+    // has no reading to give. Twenty pills reading "0 rpm / 0 N·m" around the edge
+    // of the board is noise that hides the ones that matter.
+    if (this.mode === "puzzle") {
+      const live = new Set();
+      for (const [a, b] of this.mesh_edges) { live.add(a); live.add(b); }
+      // Below the layout breakpoint the board keeps the readings that carry the
+      // level — the motor and the targets — and sheds the rest, exactly the way the
+      // top bar drops its secondary meters. Six identical pills on a 390px screen
+      // hide the two that the goal is about.
+      const terse = this.W <= CHROME_BREAKPOINT;
+      for (const t of this.tile_list) {
+        t.staged = (!t.anchored && !t.partner && !live.has(t)) ||
+                   (terse && !t.anchored && !(t.partner && t.partner.anchored));
+      }
+    } else {
+      for (const t of this.tile_list) t.staged = false;
+    }
     const items = _roBuf; items.length = 0;
     // Labels are instrument type: they shrink with the bench so a 390px screen
     // does not end up with pills bigger than the gears they annotate.
@@ -2976,6 +3084,10 @@ class Game {
       const em = Math.hypot(ex, ey);
       if (em > 1e-3) { ex /= em; ey /= em; } else { ex = 0; ey = 1; }
       ey += 0.85;                                      // labels prefer to sit above
+      // A level's drive and targets wear a tag UNDER them saying what they are and
+      // what they have to do. Their pill goes above, always, or the two collide on
+      // exactly the parts the player is reading.
+      if (this.mode === "puzzle" && t.anchored) ey += 1.6;
       const m = Math.hypot(ex, ey) || 1;
       ex /= m; ey /= m;
       const r0 = t.readout_top() + 11 * rs + bh / 2;
@@ -2990,13 +3102,17 @@ class Game {
       if (pa !== pb) return pb - pa;
       return b.t.readout_top() - a.t.readout_top();
     });
-    // visible world band, so a pill never slides under the chrome
+    // Visible world band, so a pill never slides under the chrome or off the edge.
+    // Horizontal matters as much as vertical once the camera frames a level: the
+    // machine fits, but the pills hang outside it.
     const zi = 1 / this.zoom;
-    const yTop = this.H - (68 - this.camPanY) * zi;
+    const sb = this._screen_box(false);
+    const yTop = this.H - (sb.y0 - this.camPanY) * zi;
     const yBot = this.H - (this.H - 54 - this.camPanY) * zi;
+    const xL = (sb.x0 - this.camPanX) * zi, xR = (sb.x1 - this.camPanX) * zi;
     const place = (it) => {
       const d = it.r0 + it.push;
-      it.cx = it.t.pos[0] + it.ex * d;
+      it.cx = clampf(it.t.pos[0] + it.ex * d, xL + it.bw / 2, Math.max(xL + it.bw / 2, xR - it.bw / 2));
       it.cy = clampf(it.t.pos[1] + it.ey * d, yBot + it.bh / 2, yTop - it.bh / 2);
       it.ax = it.t.pos[0] + it.ex * (it.t.readout_top() + 2);
       it.ay = it.t.pos[1] + it.ey * (it.t.readout_top() + 2);
@@ -3567,9 +3683,12 @@ const CHROME = {
   // ---------------- per-frame sync ----------------
   sync(game) {
     const mode = game.mode;
-    if (mode !== this._mode || (game.menu.ids() !== this._railKey && mode !== "menu")) {
+    // The rail's button list is identical on every level, so keying the rebuild on
+    // it alone left the objective panel showing level 1 for the whole campaign.
+    const railKey = game.menu.ids() + "|" + (mode === "puzzle" ? game.level_idx : "");
+    if (mode !== this._mode || (railKey !== this._railKey && mode !== "menu")) {
       this._mode = mode;
-      this._railKey = game.menu.ids();
+      this._railKey = railKey;
       this.el.body.dataset.mode = mode;
       this.el.title.classList.toggle("on", mode === "menu");
       if (mode !== "menu") { this.buildTop(game); this.buildRail(game); this.buildHint(game); }
@@ -3775,8 +3894,10 @@ if (typeof document !== "undefined" && document.getElementById) {
   globalThis.__GW.render = render;
   globalThis.__GW.step = function (n, dt) {
     n = n || 30; dt = dt || 1 / 60;
-    for (let i = 0; i < n; i++) game.update(dt);
-    render();
+    // update-then-render per frame, exactly like the rAF loop: anything that reads
+    // the chrome's state, or that the chrome reads back, has to see the same
+    // interleaving headless that it sees in a browser.
+    for (let i = 0; i < n; i++) { game.update(dt); render(); }
   };
 }
 

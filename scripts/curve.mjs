@@ -23,17 +23,21 @@ const rows = await page.evaluate(() => {
   const seen = new Set();
   for (let i = 0; i < L.levels().length; i++) {
     const lv = L.levels()[i];
-    const fresh = [];
+    // A milestone is a new MECHANIC, not a new field: min_rpm and max_rpm are two
+    // faces of "hit a rate", and a hand always arrives with its dial.
+    const fresh = [], notes = [];
     const note = (k) => { if (!seen.has(k)) { seen.add(k); fresh.push(k); } };
+    const aside = (k) => { if (!seen.has(k)) { seen.add(k); notes.push(k); } };
     for (const v of lv.driven) {
-      for (const k of ["spin", "min_rpm", "max_rpm", "wind_turns", "ratio"]) if (v[k] !== undefined) note(k);
-      if (v.hand) note("hand");
-      if (v.dial) note("dial");
-      if (v.type === "SP") note("spring");
+      if (v.spin !== undefined) note("spin");
+      if (v.min_rpm !== undefined || v.max_rpm !== undefined) note("rate");
+      if (v.wind_turns !== undefined) note("spring");
+      if (v.ratio) note("ratio");
+      if (v.hand || v.dial) note("hand+dial");
     }
     if ((lv.solution || []).some((s) => s.stack !== undefined)) note("stack");
-    if (lv.drives.length > 1) note("two-motors");
-    if (lv.driven.length > 1) note("branch");
+    if (lv.drives.length > 1) aside("two motors");
+    if (lv.driven.length > 1) aside("branch");
 
     const r = L.solve(i);
     const types = new Set(r.parts.filter((p) => !p.loose || true).map((p) => p.label));
@@ -60,7 +64,7 @@ const rows = await page.evaluate(() => {
       stacks: (lv.solution || []).filter((s) => s.stack !== undefined).length,
       mesh: r.edges, longest, span: +span.toFixed(1),
       targets: lv.driven.length,
-      fresh: fresh.join("+"),
+      fresh: fresh.join("+"), notes: notes.join("+"),
       win: r.win,
     });
   }
@@ -83,7 +87,7 @@ for (const r of rows) {
   const bar = "█".repeat(Math.max(1, Math.round(d)));
   console.log(`  ${rpad(r.n, 2)} ${pad(r.name, 18)} ${rpad(r.parts, 5)} ${rpad(r.types, 6)} ` +
     `${rpad(r.stacks, 4)} ${rpad(r.mesh, 5)} ${rpad(r.longest, 6)} ${rpad(r.span, 6)} ` +
-    `${rpad(r.targets, 5)}  ${pad(r.fresh || "·", 14)} ${rpad(d.toFixed(1), 4)} ${bar}`);
+    `${rpad(r.targets, 5)}  ${pad(r.fresh || (r.notes ? "(" + r.notes + ")" : "·"), 14)} ${rpad(d.toFixed(1), 4)} ${bar}`);
   if (prev !== null) jumps.push({ n: r.n, name: r.name, d: d - prev });
   prev = d;
 }

@@ -348,6 +348,12 @@ console.log("\ninteraction through the chrome layer");
   await ip.click("#title-list .btn:nth-child(3)");
   const lvl = await ip.evaluate(() => ({ mode: window.__GW.game.mode, idx: window.__GW.game.level_idx }));
   check("title level row starts the level", lvl.mode === "puzzle" && lvl.idx === 1, JSON.stringify(lvl));
+  // Let the chrome layer catch up before pointing at the board. With the real
+  // loop running this is automatic; here the page only draws when we step it, and
+  // a title screen that has not been told to hide yet still owns the pointer.
+  await ip.evaluate(() => window.__GW.step(2, 1 / 60));
+  await ip.waitForTimeout(80);
+  const cam0 = await ip.evaluate(() => { const g = window.__GW.game; return [g.zoom, g.camPanX, g.camPanY]; });
 
   // 6. dragging an inventory gear into place solves the level and shows the sheet
   const seat = await ip.evaluate(() => {
@@ -372,8 +378,9 @@ console.log("\ninteraction through the chrome layer");
     await ip.mouse.move(p1[0] + (p3[0] - p1[0]) * i / 10, p1[1] + (p3[1] - p1[1]) * i / 10);
   }
   await ip.mouse.up();
-  // one frame past the win, but well before the reveal beat has elapsed
-  await ip.evaluate(() => window.__GW.step(6, 1 / 60));
+  // far enough past the win for the target to be turning, still well inside the
+  // 0.85s reveal beat that starts when the win latches
+  await ip.evaluate(() => window.__GW.step(40, 1 / 60));
   await ip.waitForTimeout(120);
   const early = await ip.evaluate(() => ({
     win: window.__GW.game.win,
@@ -395,12 +402,24 @@ console.log("\ninteraction through the chrome layer");
       overlay: document.getElementById("winscreen").classList.contains("on"),
       next: !!document.querySelector('#win-acts .btn[data-id="next"]'),
       clear: parts.every((y) => y < card.top - 8),
-      framed: Math.abs(g.zoom - 1) > 1e-3 || Math.abs(g.camPanX) > 1 || Math.abs(g.camPanY) > 1,
+      cam: [g.zoom, g.camPanX, g.camPanY],
+      // Invisible-but-clickable is the worst failure mode a control has, and a
+      // contrast audit cannot see it: it measures colour, not opacity.
+      acts: [...document.querySelectorAll("#win-acts .btn")].map((b) => {
+        const cs = getComputedStyle(b), r = b.getBoundingClientRect();
+        return { t: b.textContent.trim(), op: +cs.opacity,
+                 inCard: r.top >= card.top - 1 && r.bottom <= card.bottom + 1 };
+      }),
     };
   });
   check("completion sheet appears with a Next Level action", won.overlay && won.next, JSON.stringify(won));
   check("the completion sheet leaves the built mechanism fully visible", won.clear, JSON.stringify(won));
-  check("the camera frames the solved mechanism", won.framed, JSON.stringify(won));
+  check(`the ${won.acts.length} completion actions are actually visible`,
+    won.acts.length > 0 && won.acts.every((a) => a.op >= 0.9 && a.inCard),
+    JSON.stringify(won.acts));
+  check("the camera re-frames onto the solved mechanism",
+    won.cam.some((v, i) => Math.abs(v - cam0[i]) > 1),
+    `before ${cam0.map((v) => v.toFixed(1))} after ${won.cam.map((v) => v.toFixed(1))}`);
 
   // 7. and Next Level advances
   if (won.next) {
