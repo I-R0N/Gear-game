@@ -372,7 +372,17 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
   #rail{top:auto;left:var(--sp-2);right:var(--sp-2);bottom:var(--sp-2);width:auto;
     flex-direction:row;align-items:stretch;gap:var(--sp-2);padding:var(--sp-2);
     transform:translateY(8px);overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
-    -webkit-overflow-scrolling:touch}
+    -webkit-overflow-scrolling:touch;
+    /* The dock is 93px wider than the screen in a level and 997px wider in free
+       play, and `overflow-x:auto` was doing nothing about it: #ui is
+       pointer-events:none and only buttons opt back in, so the strip could be
+       tapped but never dragged. It takes the pointer here. Starting a gear drag
+       through the dock was never possible anyway, and a drag that STARTS on the
+       canvas still tracks and still scraps — mouseup is bound to window, and a
+       touch stays with the element it began on. */
+    pointer-events:auto;touch-action:pan-x;overscroll-behavior-x:contain;
+    scroll-snap-type:x proximity}
+  #rail > *{scroll-snap-align:start}
   #rail::-webkit-scrollbar{display:none}
   #rail .group{flex-direction:row;align-items:stretch;gap:6px}
   #rail .group .eyebrow{display:none}
@@ -450,7 +460,7 @@ body[data-paused="1"] #topbar{border-color:rgba(255,176,32,.38);
   box-shadow:var(--e-1),inset 3px 0 0 var(--amber)}
 
 /* mobile: a fade at the dock's scrolling edge so it reads as scrollable */
-#railfade{display:none;position:absolute;pointer-events:none;
+#railfade{display:none;position:absolute;pointer-events:none;transition:opacity 140ms ease;
   background:linear-gradient(90deg,rgba(11,14,20,0),rgba(11,14,20,.92))}
 
 @media (max-width:760px){
@@ -736,8 +746,12 @@ const GAME_TITLE = "GEAR WORKS";
 // What the floating readouts say. Ratio is the campaign default because ratio is
 // what every goal is written in; Speed is the bench default because free play is
 // where torque matters. Off is there because they are a lot of furniture.
-const READOUT_MODES = ["ratio", "speed", "off"];
-const READOUT_LABEL = { ratio: "Ratio", speed: "Speed", off: "Off" };
+const READOUT_MODES = ["ratio", "mesh", "speed", "off"];
+const READOUT_LABEL = { ratio: "Ratio", mesh: "Mesh", speed: "Speed", off: "Off" };
+// Independent of the mode: WHICH parts and meshes get labelled. "key" is the motor
+// and the targets, which is all a phone has room for; "all" is the whole train.
+const READOUT_SCOPES = ["key", "all"];
+const SCOPE_LABEL = { key: "Key", all: "All" };
 // "Is it turning at all". Small on purpose: a clock's hour hand runs at a fifth of
 // an rpm, and the coast integrator snaps a freewheeling part below COAST_STOP_EPS
 // to exactly zero, so a stopped part reads 0 rather than something tiny.
@@ -1803,6 +1817,7 @@ class GearMenu {
 // ============================================================
 const _roBuf = [];
 const _roPlaced = [];
+const _chipBoxes = [];
 const _byZ = (a, b) => a.z - b.z;
 const _layers = new Map();   // baked full-screen backdrop / vignette bitmaps
 let _layerSize = "";
@@ -1816,7 +1831,7 @@ class Game {
     this.dragging = false; this.drag_tile = null;
     this.touch_start = [0, 0]; this.paused = false; this.selected_driver = null;
     this.mesh_edges = []; this._graph = new Map(); this._topology_dirty = true;
-    this.readout_mode = "ratio";
+    this.readout_mode = "ratio"; this.readout_scope = "all";
     this._flashes = []; this._meshSeen = null;
     this.zoom = 1; this.camPanX = 0; this.camPanY = 0;   // view camera
     this._recompute_geometry();
@@ -1879,14 +1894,22 @@ class Game {
     const i = READOUT_MODES.indexOf(this.readout_mode);
     this.readout_mode = READOUT_MODES[(i + 1) % READOUT_MODES.length];
   }
+  cycle_scope() {
+    const i = READOUT_SCOPES.indexOf(this.readout_scope);
+    this.readout_scope = READOUT_SCOPES[(i + 1) % READOUT_SCOPES.length];
+  }
+  // Sensible default, not a rule: a phone starts on the motor and the targets
+  // because six pills do not fit, and the player can say otherwise.
+  _default_scope() { return this.W <= CHROME_BREAKPOINT ? "key" : "all"; }
   start_free_play() {
     this.mode = "free"; this._reset_camera(); this._clear_board();
     this.readout_mode = "speed";       // the bench is where torque matters
+    this.readout_scope = this._default_scope();
     this.menu.set_buttons([
       ["Add U1","add_tri"],["Add U2","add_u2"],["Add U3","add_u3"],
       ["Add U4","add_u4"],["Add U5","add_u5"],["Spring","add_sp"],
       ["Rack","add_rack"],["Link","add_link"],["Ring","add_ring"],
-      ["Wind Up","wind_up"],["Damp: Normal","damp"],["Readouts","readout"],
+      ["Wind Up","wind_up"],["Damp: Normal","damp"],["Readouts","readout"],["Detail","scope"],
       ["Speed -","spd_dn"],["Speed +","spd_up"],["Pause","pause"],["Menu","to_menu"]]);
     this._sync_damp_label();
     this.menu.layout(this.W, this.H);
@@ -1944,6 +1967,7 @@ class Game {
   start_level(idx) {
     this.mode = "puzzle"; this._reset_camera();
     this.readout_mode = "ratio";       // every goal in the campaign is a ratio
+    this.readout_scope = this._default_scope();
     DAMP_MODE = 0; DAMPING = DAMP_PRESETS[0];   // puzzles always use the tuned feel
     this.level_idx = Math.max(0, Math.min(idx, LEVELS.length - 1));
     this._clear_board();
@@ -1963,7 +1987,8 @@ class Game {
 
     this._drop_inventory(lv.inventory || []);   // stage the player's gears
 
-    this.menu.set_buttons([["Readouts", "readout"], ["Restart", "restart"], ["Menu", "to_menu"]]);
+    this.menu.set_buttons([["Readouts", "readout"], ["Detail", "scope"],
+                           ["Restart", "restart"], ["Menu", "to_menu"]]);
     this.menu.layout(this.W, this.H);
     this._win_at = null;
     this._mark_dirty(); this._ensure_rebuilt();
@@ -2184,6 +2209,22 @@ class Game {
     this._graph = this._build_ratio_graph();
     this._topology_dirty = false;
     this._track_engagements();
+    this._rank_from_drives();
+  }
+  // Hops from the nearest motor, over meshes and shafts alike. A mesh ratio is only
+  // meaningful with a direction — "one turn in, 2.5 out" — and this is what says
+  // which end is "in". Recomputed on topology change, never per frame.
+  _rank_from_drives() {
+    for (const t of this.tile_list) t.depth = 1e9;
+    const q = [];
+    for (const t of this.tile_list) if (t.is_driver) { t.depth = 0; q.push(t); }
+    const adj = this._graph;
+    for (let i = 0; i < q.length; i++) {
+      const c = q[i];
+      const nb = adj.get(c);
+      if (!nb) continue;
+      for (const [n] of nb) if (n.depth > c.depth + 1) { n.depth = c.depth + 1; q.push(n); }
+    }
   }
   // Presentation only: remember which pairs are meshed so a NEW engagement can
   // be acknowledged with a one-shot ring at the contact point. Runs on topology
@@ -2988,6 +3029,10 @@ class Game {
     this._draw_flashes();
     this._draw_selected_highlight();
     this._draw_readouts();
+    // Chips go over the pills, not under. They answer a question the player is asking
+    // this instant — "what does this mesh give me" — where a pill is ambient, and a
+    // chip half-hidden behind a pill is worse than no chip.
+    this._draw_mesh_ratios();
 
     ctx.restore();
 
@@ -3097,6 +3142,117 @@ class Game {
   // Two passes. `under` paints the rings, which are context and belong beneath the
   // parts; the other paints the tags and guidance arrows, which are annotation and
   // belong on top.
+  _draw_chip(cx, cy, text, color, alpha) {
+    const ctx = G.ctx, size = 9;
+    const font = G.font(size, 600, true);
+    const w = G.measure(text, font) + 11;
+    const h = 14, y = G.fy(cy) - h / 2;
+    G.roundRect(cx - w / 2, y, w, h, 3);
+    ctx.fillStyle = ca(T.void, 0.88 * alpha); ctx.fill();
+    ctx.strokeStyle = ca(color, 0.38 * alpha); ctx.lineWidth = 1; ctx.stroke();
+    G.label(text, cx, cy, { size, weight: 600, align: "center", mono: true,
+                            color, alpha: 0.95 * alpha });
+  }
+  // "one turn in, this many out", across a single mesh. Unlike the cumulative pill
+  // this needs no solve at all — it is the pair's tooth ratio — so it reads
+  // correctly on a board that is not even running, which is what makes it useful
+  // for planning a train before powering it.
+  _mesh_ratio_text(a, b) {
+    const up = a.depth <= b.depth ? a : b, dn = up === a ? b : a;
+    const ru = up.pitch_r(), rd = dn.pitch_r();
+    if (ru <= 1e-9 || rd <= 1e-9) return null;      // racks have no pitch circle
+    const k = ru / rd;
+    if (Math.abs(k - 1) < 0.02) return "1 : 1";
+    return k > 1 ? "1 : " + (k < 9.95 ? k.toFixed(1) : Math.round(k))
+                 : (1 / k < 9.95 ? (1 / k).toFixed(1) : Math.round(1 / k)) + " : 1";
+  }
+  // Chips on the mesh lines. Three ways to get one: Mesh mode shows them all;
+  // hovering a part shows the meshes it is in; and holding a part shows what it
+  // WOULD mesh with if dropped here — which is the moment the number is worth most,
+  // and is only possible because the number does not depend on the train running.
+  _draw_mesh_ratios() {
+    this._chips = 0;
+    if (this.readout_mode === "off") return;
+    const all = this.readout_mode === "mesh";
+    const key = this.readout_scope === "key";
+    const focus = this.drag_tile || this._hover_tile;
+    if (!all && !focus) return;
+    if (focus && focus.is_rack()) return;
+    let drawn = 0;
+    // Chips are placed, not just positioned. A chip starts on the mesh normal, out
+    // past the smaller of the two gears; if that lands on a readout pill or on a chip
+    // already down, it tries the other side of the line and then walks outward. The
+    // pills are already in `_roPlaced` because readouts draw first — which is the
+    // second reason chips moved to the end of the frame, after "so they sit on top".
+    const boxes = _chipBoxes; boxes.length = 0;
+    const clash = (cx, cy, w) => {
+      for (const p of boxes) {
+        if (Math.abs(p.cx - cx) < (p.w + w) / 2 + 4 && Math.abs(p.cy - cy) < 14 + 4) return true;
+      }
+      for (const p of _roPlaced) {
+        if (Math.abs(p.cx - cx) < (p.bw + w) / 2 + 4 && Math.abs(p.cy - cy) < (p.bh + 14) / 2 + 4) return true;
+      }
+      return false;
+    };
+    const chip = (a, b, alpha, flip) => {
+      const txt = this._mesh_ratio_text(a, b);
+      if (!txt) return;
+      const w = G.measure(txt, G.font(9, 600, true)) + 11;
+      const ra = a.pitch_r(), rb = b.pitch_r();
+      const f = ra + rb > 1e-9 ? ra / (ra + rb) : 0.5;
+      const px = a.pos[0] + (b.pos[0] - a.pos[0]) * f;
+      const py = a.pos[1] + (b.pos[1] - a.pos[1]) * f;
+      let nx = -(b.pos[1] - a.pos[1]), ny = b.pos[0] - a.pos[0];
+      const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+      const base = Math.min(ra, rb) * 0.85 + 13;
+      let cx = px + nx * base * (flip ? -1 : 1), cy = py + ny * base * (flip ? -1 : 1);
+      for (let i = 0; i < 8 && clash(cx, cy, w); i++) {
+        // alternate sides first, then step outward on both — a chip that has to move
+        // stays on its own mesh line, so it never migrates onto a mesh it is not about
+        const s = i % 2 === 0 ? -1 : 1, out = base + Math.floor(i / 2) * 17;
+        cx = px + nx * out * s * (flip ? -1 : 1);
+        cy = py + ny * out * s * (flip ? -1 : 1);
+      }
+      boxes.push({ cx, cy, w, h: 14, a: alpha });
+      this._draw_chip(cx, cy, txt, T.cyanHi, alpha);
+      drawn++;
+    };
+    if (all) {
+      let i = 0;
+      for (const [a, b] of this.mesh_edges) {
+        if (key && !(a.anchored || b.anchored)) continue;
+        chip(a, b, 1, (i++) % 2 === 1);
+      }
+    }
+    if (!focus) { this._chips = drawn; return; }
+    // The part in hand has no mesh edges — it is out of the graph while held — so
+    // this is prospective: every gear it is close enough to tangency with.
+    const band = this.mesh_tol * 4;
+    // A prospective chip FADES IN as the part approaches tangency instead of popping.
+    // Carrying a gear across a crowded board would otherwise flash numbers at every
+    // wheel you pass; the ramp makes brightness read as "this is the one you are
+    // about to make", so the chip you can read is the chip that is about to be true.
+    const near = [];
+    for (const o of this.tile_list) {
+      if (o === focus || o === focus.partner || o.is_rack() || o.is_ring()) continue;
+      const d = dist(focus.pos, o.pos), want = focus.pitch_r() + o.pitch_r();
+      const err = Math.abs(d - want);
+      if (err > band) continue;
+      if (all && this.mesh_edges.some(([x, y]) => (x === focus && y === o) || (x === o && y === focus))) continue;
+      near.push({ o, err });
+    }
+    // Nearest to tangency first, so the four that survive the cap are the four the
+    // player is most plausibly aiming at rather than whichever came first in the list.
+    near.sort((p, q) => p.err - q.err);
+    let shown = 0;
+    for (const { o, err } of near) {
+      const t = 1 - err / band;                       // 0 at the edge of the band, 1 at tangency
+      const a = (this.drag_tile ? 0.12 : 0.10) + t * t * (this.drag_tile ? 0.88 : 0.75);
+      chip(focus, o, a, shown % 2 === 1);
+      if (++shown >= 4) break;
+    }
+    this._chips = drawn;
+  }
   _draw_roles(under) {
     for (const t of this.tile_list) {
       if (t.role === "drive") {
@@ -3179,21 +3335,23 @@ class Game {
   // and the whole thing is clamped to the visible band so nothing hides under the
   // top bar. Text never lands on metal; that is what the stem is for.
   _draw_readouts() {
-    if (this.readout_mode === "off") { _roPlaced.length = 0; return; }
+    // Mesh mode puts the numbers on the meshes instead of on the parts, so the
+    // pills stand down entirely — that is what makes it quieter than Ratio, not
+    // just different.
+    if (this.readout_mode === "off" || this.readout_mode === "mesh") { _roPlaced.length = 0; return; }
     // A part still sitting in the staging row is not part of any train yet, so it
     // has no reading to give. Twenty pills reading "0 rpm / 0 N·m" around the edge
     // of the board is noise that hides the ones that matter.
     if (this.mode === "puzzle") {
       const live = new Set();
       for (const [a, b] of this.mesh_edges) { live.add(a); live.add(b); }
-      // Below the layout breakpoint the board keeps the readings that carry the
-      // level — the motor and the targets — and sheds the rest, exactly the way the
-      // top bar drops its secondary meters. Six identical pills on a 390px screen
-      // hide the two that the goal is about.
-      const terse = this.W <= CHROME_BREAKPOINT;
+      // `staged` means "not part of any train yet, so it has nothing to report".
+      // Whether the parts that DO have something to report get to say it is the
+      // scope toggle's business, not the viewport's.
+      const key = this.readout_scope === "key";
       for (const t of this.tile_list) {
         t.staged = (!t.anchored && !t.partner && !live.has(t)) ||
-                   (terse && !t.anchored && !(t.partner && t.partner.anchored));
+                   (key && !t.anchored && !(t.partner && t.partner.anchored));
       }
     } else {
       for (const t of this.tile_list) t.staged = false;
@@ -3209,6 +3367,10 @@ class Game {
     const reach = this.step * 4.2;
     for (const t of this.tile_list) {
       if (t.is_rack()) continue;                       // racks carry their own inline text
+      // The part in hand is out of the ratio graph, so its pill reads "— / 0 rpm" —
+      // a true statement about nothing, drawn right where the prospective mesh chips
+      // are trying to say something useful. It stands down until the part is put down.
+      if (t === this.drag_tile || (t.partner && t.partner === this.drag_tile)) continue;
       const lines = t.readout_lines(); if (!lines) continue;
       // Quantised on purpose. The pill's width used to track its text, so a
       // settling train — where "119 rpm" becomes "120 rpm" and the torque drifts
@@ -3388,6 +3550,7 @@ class Game {
     else if (mid === "spd_dn") this._adjust_selected_speed(-SPEED_STEP_RPM);
     else if (mid === "pause") { this.paused = !this.paused; this._sync_pause_label(); }
     else if (mid === "readout") this.cycle_readouts();
+    else if (mid === "scope") this.cycle_scope();
     else if (mid === "damp") {
       DAMP_MODE = (DAMP_MODE + 1) % DAMP_PRESETS.length;
       DAMPING = DAMP_PRESETS[DAMP_MODE];
@@ -3430,6 +3593,8 @@ class Game {
   }
   pointer_move(mx, my) {
     this._dragUI0 = mx; this._dragUI1 = this.H - my;
+    // Remembered for the mesh chips: hovering a part shows what it is meshed with.
+    if (!this.dragging) this._hover_tile = this._pick_tile(this.screen_to_world(mx, my));
     if (!this.dragging || !this.drag_tile) return;
     const world = this.screen_to_world(mx, my);
     const t = this.drag_tile;
@@ -3437,6 +3602,7 @@ class Game {
     if (t.partner && !t.on_shaft_top) t.partner.pos = t.pos.slice();   // base carries its stack
   }
   pointer_up(mx, my) {
+    this._hover_tile = null;
     if (!this.dragging || !this.drag_tile) return;
     const t = this.drag_tile; this.drag_tile = null; this.dragging = false;
     const ui = this.screen_to_ui(mx, my);
@@ -3500,6 +3666,7 @@ const ICO = (() => {
     u4: gear(16, 10.6, 8.0, 2.6),
     u5: gear(19, 11.2, 8.6, 2.8),
     sp: gear(12, 11, 8.6, 0.1).replace("</path>", "</path>") + spiral(2.4, 1.6, 7),
+    scope: stroke("M3 12h4l2.5-6 5 12 2.5-6h4"),
     star: '<path d="M12 3.2 14.7 9l6.3.8-4.6 4.3 1.2 6.2L12 17.4 6.4 20.3l1.2-6.2L3 9.8 9.3 9Z"' +
           ' fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>',
     gauge: stroke("M4 17a8 8 0 0 1 16 0") + stroke("M12 17 16.5 11.5") +
@@ -3573,7 +3740,18 @@ const CHROME = {
     $("winseal").innerHTML = ICO.seal;
     this.buildTitle(game);
     this.buildWin(game);
-    addEventListener("resize", () => { this._needRect = true; });
+    // The fade at the dock's right edge says "there is more this way". Once there
+    // isn't, it is just a smear over the last button, so it fades out at the end of
+    // the scroll — and stays out when the dock fits without scrolling at all.
+    const fade = $("railfade");
+    const syncFade = () => {
+      const r = this.el.rail;
+      const more = r.scrollWidth - r.clientWidth - r.scrollLeft > 4;
+      fade.style.opacity = more ? "1" : "0";
+    };
+    this._syncFade = syncFade;
+    this.el.rail.addEventListener("scroll", syncFade, { passive: true });
+    addEventListener("resize", () => { this._needRect = true; syncFade(); });
   },
 
   // Only touch the DOM when the string actually changed — a running sim must not
@@ -3782,6 +3960,12 @@ const CHROME = {
         this.el.r.readout = b.querySelector(".val");
         bench.appendChild(b);
       }
+      if (has("scope")) {
+        const b = this.btn("scope", "Detail", "scope", "", () => game._handle_menu("scope"));
+        b.innerHTML = this.svg("scope") + '<span class="lbl">Detail</span><span class="val"></span>';
+        this.el.r.scope = b.querySelector(".val");
+        bench.appendChild(b);
+      }
       if (has("pause")) {
         const b = this.btn("pause", "Pause", "pause", "", () => game._handle_menu("pause"));
         this.el.r.pause = b;
@@ -3822,6 +4006,12 @@ const CHROME = {
         this.el.r.readout = b.querySelector(".val");
         lvg.appendChild(b);
       }
+      if (has("scope")) {
+        const b = this.btn("scope", "Detail", "scope", "", () => game._handle_menu("scope"));
+        b.innerHTML = this.svg("scope") + '<span class="lbl">Detail</span><span class="val"></span>';
+        this.el.r.scope = b.querySelector(".val");
+        lvg.appendChild(b);
+      }
       if (has("restart")) lvg.appendChild(this.btn("restart", "Restart", "restart", "", () => game._handle_menu("restart")));
       rail.appendChild(lvg);
     }
@@ -3842,6 +4032,10 @@ const CHROME = {
     rail.appendChild(tray);
 
     rail.appendChild(this.btn("to_menu", "Main Menu", "back", "", () => game._handle_menu("to_menu")));
+    // A rebuilt rail is a different width and starts at scrollLeft 0, so the fade has
+    // to be re-decided here as well as on scroll.
+    rail.scrollLeft = 0;
+    if (this._syncFade) this._syncFade();
     this._needRect = true;
   },
 
@@ -3893,6 +4087,7 @@ const CHROME = {
         this.el.r.targets.classList.toggle("done", !!driven.length && on === driven.length);
       }
       if (this.el.r && this.el.r.readout) this.set(this.el.r.readout, READOUT_LABEL[game.readout_mode]);
+      if (this.el.r && this.el.r.scope) this.set(this.el.r.scope, SCOPE_LABEL[game.readout_scope]);
       if (this.el.r && this.el.r.goals) {
         for (const g of this.el.r.goals) g.el.classList.toggle("done", game.target_ok(g.tile));
       }
@@ -3920,6 +4115,7 @@ const CHROME = {
         }
       }
       if (r.readout) this.set(r.readout, READOUT_LABEL[game.readout_mode]);
+      if (r.scope) this.set(r.scope, SCOPE_LABEL[game.readout_scope]);
       if (r.damp) {
         this.set(r.damp, DAMPING.short);
         const b = r.damp.parentElement;
@@ -3954,7 +4150,7 @@ const CHROME = {
 };
 
 // Expose for headless testing
-if (typeof globalThis !== "undefined") globalThis.__GW = { Game, G, tri_to_screen, rpm_to_omega, omega_to_rpm, LEVELS, readouts: _roPlaced,
+if (typeof globalThis !== "undefined") globalThis.__GW = { Game, G, tri_to_screen, rpm_to_omega, omega_to_rpm, LEVELS, readouts: _roPlaced, chips: _chipBoxes,
                                                 LEVEL_BOX, SPRING_MAX_WIND, WIN_REVEAL_DELAY };
 
 // ============================================================
