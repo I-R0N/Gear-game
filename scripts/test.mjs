@@ -374,6 +374,25 @@ console.log("\ninteraction through the chrome layer");
   check("drop on the tool rail scraps a part", left.gone && left.n === scrap.n - 1,
     `${scrap.n} -> ${left.n}, gone=${left.gone}`);
 
+  // 4b. the title screen's level list must actually scroll. The chrome layer is
+  // pointer-events:none with only buttons opting back in, which left the wheel
+  // falling through to the canvas and zooming the board instead.
+  await ip.evaluate(() => { window.__GW.game.enter_main_menu(); window.__GW.step(2, 1 / 60); });
+  await ip.waitForTimeout(140);
+  const scroll = await ip.evaluate(async () => {
+    const el = document.getElementById("title-list");
+    const before = el.scrollTop, zoom0 = window.__GW.game.zoom;
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY: 400, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 60));
+    return { scrollable: el.scrollHeight > el.clientHeight + 4,
+             hit: getComputedStyle(el).pointerEvents !== "none",
+             rows: el.querySelectorAll(".btn").length,
+             moved: el.scrollTop > before, zoomChanged: window.__GW.game.zoom !== zoom0 };
+  });
+  check(`the title list holds all ${scroll.rows} rows and can be scrolled`,
+    scroll.rows === 21 && scroll.scrollable && scroll.hit && !scroll.zoomChanged,
+    JSON.stringify(scroll));
+
   // 5. a title-screen level row starts that level
   await ip.evaluate(() => { window.__GW.game.enter_main_menu(); window.__GW.step(2, 1 / 60); });
   await ip.waitForTimeout(120);
@@ -452,6 +471,32 @@ console.log("\ninteraction through the chrome layer");
   check("the camera re-frames onto the solved mechanism",
     won.cam.some((v, i) => Math.abs(v - cam0[i]) > 1),
     `before ${cam0.map((v) => v.toFixed(1))} after ${won.cam.map((v) => v.toFixed(1))}`);
+
+  // 6b. the reported "false positive": drop the last gear correctly, then grab it
+  // again during the 0.85s before the sheet appears. The board must stay live and
+  // the part must follow the pointer — it used to be frozen by the win, and before
+  // that a target still coasting from a broken train could latch a win off a gear
+  // that was only HOVERING, which then landed wherever the player let go.
+  const regrab = await ip.evaluate(() => {
+    const g = window.__GW.game;
+    const t = g.tile_list.find((x) => !x.anchored && x.drive_ratio != null);
+    return { uid: t.uid, pos: t.pos.slice(), step: g.step, win: g.win };
+  });
+  p1 = await toScreen(regrab.pos);
+  const p5 = await toScreen([regrab.pos[0], regrab.pos[1] + regrab.step * 2.4]);
+  await ip.mouse.move(p1[0], p1[1]);
+  await ip.mouse.down();
+  for (let i = 1; i <= 6; i++) {
+    await ip.mouse.move(p1[0] + (p5[0] - p1[0]) * i / 6, p1[1] + (p5[1] - p1[1]) * i / 6);
+  }
+  const held = await ip.evaluate((uid) => {
+    const g = window.__GW.game, t = g.tile_list.find((x) => x.uid === uid);
+    return { dragging: g.dragging, isIt: g.drag_tile === t, cam: !!g._cam_to || !!g._cam_pending };
+  }, regrab.uid);
+  await ip.mouse.up();
+  check("a solved board stays live: the part can be picked back up and follows",
+    regrab.win && held.dragging && held.isIt && !held.cam,
+    JSON.stringify({ regrab: regrab.win, ...held }));
 
   // 7. stacking a BIG gear onto a SMALL one, with a real mouse and a sloppy drop.
   // Level 10 needs exactly this (a speed-increasing stage puts the pinion on the
