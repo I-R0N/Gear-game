@@ -63,6 +63,7 @@ npm run audit        # frame cost, WCAG AA contrast, 44px touch targets
 npm run curve        # per-level difficulty instrumentation
 npm run shots        # render shots/after/*.png at 1280x800 and 390x844
 npm run shots:levels # every level, start and solved, both viewports -> shots/levels/
+npm run play         # play the campaign with real pointer input and sloppy drops
 ```
 
 `npm test` is the campaign's contract. Every level ships a machine-checkable **solution
@@ -71,6 +72,11 @@ then asserts the level wins, has *exactly* the meshes its own numbers imply, kee
 units clear of an accidental tangency, needs every part it ships, resists both degenerate
 placements, cannot wind a barrel into a soft-lock, and fits inside the intersection of the
 safe boxes measured live at both viewports. 216 assertions.
+
+`npm run play` is the feel check. It plays every level with real pointer events and
+deliberately sloppy drops at both viewports, and reports the largest miss each level still
+tolerates. Solvable and playable are different properties, and only the first one is easy
+to test: the run that introduced this found a level whose stack target was 5px on a phone.
 
 `npm run curve` is the difficulty-curve instrumentation: part count, distinct types, stack
 count, mesh count, longest train, ratio span and new-element flag per level, with the

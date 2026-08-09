@@ -421,8 +421,45 @@ console.log("\ninteraction through the chrome layer");
     won.cam.some((v, i) => Math.abs(v - cam0[i]) > 1),
     `before ${cam0.map((v) => v.toFixed(1))} after ${won.cam.map((v) => v.toFixed(1))}`);
 
-  // 7. and Next Level advances
+  // 7. stacking a BIG gear onto a SMALL one, with a real mouse and a sloppy drop.
+  // Level 10 needs exactly this (a speed-increasing stage puts the pinion on the
+  // shaft of the wheel it drives), and it used to be a 10px target on desktop and
+  // 5px on a phone. `npm run play` measures every level's tolerance; this pins the
+  // one that was genuinely unplayable so the capture constant cannot quietly
+  // regress back to scaling off the base gear alone.
+  await ip.evaluate(() => { window.__GW.game.start_level(9); window.__GW.step(2, 1 / 60); });
+  const st = await ip.evaluate(() => {
+    const g = window.__GW.game, U = g.Rp2;
+    const sol = window.__GW.LEVELS[9].solution;
+    const loose = g.tile_list.filter((t) => !t.anchored);
+    const p = [g.origin[0] + U * sol[0].pos[0], g.origin[1] + U * sol[0].pos[1]];
+    loose[0].pos = p.slice(); g._snap_gear(loose[0], p.slice());   // seat the U1 base
+    g._mark_dirty();
+    // release the U2 a third of a U2-radius off the U1's centre
+    return { uid: loose[1].uid, from: loose[1].pos.slice(),
+             to: [loose[0].pos[0] + U * 0.33, loose[0].pos[1] - U * 0.2] };
+  });
+  p1 = await toScreen(st.from);
+  const p4 = await toScreen(st.to);
+  await ip.mouse.move(p1[0], p1[1]);
+  await ip.mouse.down();
+  for (let i = 1; i <= 10; i++) {
+    await ip.mouse.move(p1[0] + (p4[0] - p1[0]) * i / 10, p1[1] + (p4[1] - p1[1]) * i / 10);
+  }
+  await ip.mouse.up();
+  await ip.evaluate(() => window.__GW.step(90, 1 / 60));
+  const stacked = await ip.evaluate((uid) => {
+    const g = window.__GW.game, t = g.tile_list.find((x) => x.uid === uid);
+    return { partner: !!t.partner, win: g.win };
+  }, st.uid);
+  check("a sloppy drop stacks a big gear onto a small one", stacked.partner && stacked.win,
+    JSON.stringify(stacked));
+
+  // 8. and Next Level advances
   if (won.next) {
+    await ip.evaluate(() => { window.__GW.game.start_level(1); window.__GW.step(2, 1 / 60); });
+    await ip.evaluate(() => { const g = window.__GW.game; g.win = true; g._win_at = g.anim - 2; });
+    await ip.evaluate(() => window.__GW.step(2, 1 / 60));
     await ip.click('#win-acts .btn[data-id="next"]');
     const nx = await ip.evaluate(() => ({ idx: window.__GW.game.level_idx, win: window.__GW.game.win }));
     check("Next Level advances", nx.idx === 2 && nx.win === false, JSON.stringify(nx));

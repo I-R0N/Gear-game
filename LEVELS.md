@@ -112,6 +112,49 @@ Each of these is an assertion in `npm test`, run against all twenty levels every
   and tooth tips, lies inside the intersection of the safe boxes measured live at both
   viewports. Mobile sets the horizontal limit and desktop sets both vertical ones.
 
+## Does it feel right?
+
+`npm test` proves every level is *solvable* — it seats each solution spec at its exact
+tangent coordinates. That is not the same as *playable*. A player drags a part and lets go
+somewhere near the right place, so whether a level works in the hand depends entirely on
+how forgiving the snapper and the stack-capture radius are, and nothing in the suite
+measured that.
+
+`npm run play` does. It plays the whole campaign with real pointer events and deliberately
+sloppy drops, at both viewports, missing every target by a ladder of offsets in units of
+`Rp2` (one U2 pitch radius — over half a small gear at the top of the ladder), and reports
+the largest miss each level still tolerates.
+
+The first run found three things the suite could not:
+
+* **Level 10 was very nearly unplayable.** It needs a `U2` stacked onto a `U1`, because a
+  speed-increasing stage puts the pinion on the shaft of the wheel it drives. The
+  stack-capture radius scaled off the *base* gear alone, so the target was 10px on desktop
+  and **5px on a phone**. It is a fraction of the pair's tangent distance now — which is
+  the distance the competing gesture ("mesh with that gear") actually lives at — and the
+  level went from 0.15 to 0.60.
+* **Branch levels were fussy.** A gear that has to mesh two fixed neighbours has one
+  correct position, and the snapper only took that two-gear pocket within 0.30 step of the
+  drop. Widening it helped levels 4 and 14 — but the first attempt at 0.62 was too eager
+  and hijacked a placement in level 12 and the six-planet rosette in the free-play scene,
+  which is where 0.40 and "the pocket must include the gear the drop is nearest to being
+  tangent to" came from. Both failure modes are in the suite now.
+* **Level 14 took 6.3 seconds to acknowledge a win.** Two barrels sharing one train wind
+  at half the rate. Faster motor; 3.1s now.
+
+Where it stands, at both 1280×800 and 390×844:
+
+```
+tolerance   levels
+0.60        1, 3, 6, 7, 10, 13, 15, 16, 17, 19, 20   (and 5, 8 on mobile)
+0.45        2, 4, 5, 8, 9, 11, 12, 18
+0.30        14
+```
+
+Nothing needs a near-exact drop. The two spring levels take 2.8s and 3.1s to register,
+which is the mechanic rather than a defect — you are watching a barrel fill, and it has a
+progress arc and a live turns readout while you do.
+
 ## What was cut
 
 * **Ring / planetary, rack and pinion, crank linkage.** None of the three is on the path
