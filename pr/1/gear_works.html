@@ -853,10 +853,11 @@ const G = {
     c.setLineDash(_dashNone); c.lineDashOffset = 0;
   },
   // rounded-rect path in CANVAS coords (y already flipped)
-  roundRect(x, y, w, h, r) {
+  roundRect(x, y, w, h, r) { this.ctx.beginPath(); this.addRoundRect(x, y, w, h, r); },
+  // ...as a SUBPATH, so it can be punched out of an even-odd fill
+  addRoundRect(x, y, w, h, r) {
     const c = this.ctx;
     r = Math.min(r, w / 2, h / 2);
-    c.beginPath();
     c.moveTo(x + r, y);
     c.arcTo(x + w, y, x + w, y + h, r);
     c.arcTo(x + w, y + h, x, y + h, r);
@@ -897,25 +898,6 @@ const _measCache = new Map();
 // ============================================================
 // Drawing helpers (ported)
 // ============================================================
-function hex_vertices(cx, cy, r) {
-  const v = [];
-  for (let k = 0; k < 6; k++) { const a = (60*k + 30) * Math.PI/180; v.push([cx + r*Math.cos(a), cy + r*Math.sin(a)]); }
-  return v;
-}
-// The see-through windows in a gear body: a ring of circles around the hub, made
-// as large as possible without touching the teeth (outer limit) or each other
-// (mutual limit). Those two limits balance when ringR*(1 + sin(pi/n)) = r_teeth.
-// Same geometry is used to punch holes in the body and to stroke their outlines.
-function gear_windows(cx, cy, pitch_r, angle, tooth_inner_r) {
-  const n = 6, sinp = Math.sin(Math.PI / n);                 // 0.5 for n = 6
-  const rLim = (tooth_inner_r || pitch_r * 0.85) - pitch_r * 0.045;   // sit just inside the teeth
-  const ringR = rLim / (1 + sinp);
-  const dotR = ringR * sinp * 0.94;                          // small gap between windows
-  const out = [];
-  for (let k = 0; k < n; k++) { const a = angle + (k / n) * TAU; out.push([cx + ringR*Math.cos(a), cy + ringR*Math.sin(a), dotR]); }
-  return out;
-}
-
 // ============================================================
 // MACHINED MATERIAL — the one place a part's look is derived from its alloy.
 // Everything is built in LOCAL canvas space (y-down, origin at the part centre)
@@ -990,12 +972,53 @@ function bevel_stroke(ctx, R) {
     return g;
   });
 }
+// A ring's body: outer circle, bore, and N milled radial slots — all one
+// even-odd path, so the slots are genuinely see-through. Caps are polylined
+// rather than arc()-ed to keep the angle bookkeeping honest at any rotation.
+function ring_body_path(ri, ro, n) {
+  ri = _q(ri); ro = _q(ro);
+  return _pathC("RB" + ri + "|" + ro + "|" + n, () => {
+    const p = new Path2D();
+    p.moveTo(ro, 0); p.arc(0, 0, ro, 0, TAU);
+    p.moveTo(ri, 0); p.arc(0, 0, ri, 0, TAU);
+    const rim = ro - ri;
+    // Margins eat length twice over (once per end, plus a cap radius each), so
+    // keep them small or the "slot" collapses into a round hole.
+    const cap = Math.max(1.5, rim * 0.13);
+    const rA = ri + rim * 0.11 + cap, rB = ro - rim * 0.11 - cap;
+    if (rB > rA) {
+      const STEPS = 8;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * TAU, ca = Math.cos(a), sa = Math.sin(a);
+        let first = true;
+        // local slot frame: x along the radius, y across it
+        const put = (x, y) => {
+          const X = x * ca - y * sa, Y = x * sa + y * ca;
+          if (first) { p.moveTo(X, Y); first = false; } else p.lineTo(X, Y);
+        };
+        put(rA, cap); put(rB, cap);
+        for (let k = 1; k < STEPS; k++) {                 // outer cap
+          const t = Math.PI / 2 - (k / STEPS) * Math.PI;
+          put(rB + cap * Math.cos(t), cap * Math.sin(t));
+        }
+        put(rB, -cap); put(rA, -cap);
+        for (let k = 1; k < STEPS; k++) {                 // inner cap
+          const t = -Math.PI / 2 - (k / STEPS) * Math.PI;
+          put(rA + cap * Math.cos(t), cap * Math.sin(t));
+        }
+        p.closePath();
+      }
+    }
+    return p;
+  });
+}
+
 // Scratch buffer for the rotating window holes: [x, y, r] triples, canvas coords.
 const _win = new Float64Array(24);
 let _winN = 0;
 function local_windows(pitch_r, angle, tooth_inner_r, extraR) {
   const n = 6, sinp = 0.5;
-  const rLim = (tooth_inner_r || pitch_r * 0.85) - pitch_r * 0.045;
+  const rLim = (tooth_inner_r || pitch_r * 0.85) - pitch_r * 0.14;
   const ringR = rLim / (1 + sinp);
   const dotR = ringR * sinp * 0.94;
   _winN = 0;
@@ -1083,6 +1106,11 @@ function paint_gear(ctx, base, R, kind, rot, pitch_r, teeth, ri, ro, angle, extr
 }
 // Trace a plate outline onto the current context path (no allocation).
 function _trace_plate(ctx, kind, R, rot) {
+  if (kind === "disc") {
+    ctx.moveTo(R, 0);
+    ctx.arc(0, 0, R, 0, TAU);
+    return;
+  }
   if (kind === "tri") {
     for (let k = 0; k < 3; k++) {
       const a = -(k * TAU / 3 + Math.PI / 2 + (rot || 0));
@@ -1245,7 +1273,6 @@ class HexGearTile extends TileBase {
   // Central window when stacked: reveal as much of the partner as we can, but keep
   // it inside our own window ring so our teeth/rim stay intact.
   _central_window_r() { return this.partner ? Math.min(this.Rp*0.50, Math.max(this.partner.pitch_r()*1.02, this.Rp*0.30)) : 0; }
-  vertex_points_world() { return hex_vertices(this.pos[0], this.pos[1], this.R); }
   hit_radius() { return this.R*0.95; }
   draw() {
     const x = this.pos[0], y = this.pos[1], ctx = G.ctx;
@@ -1255,7 +1282,9 @@ class HexGearTile extends TileBase {
     const extra = this.partner ? this._central_window_r() : 0;
     ctx.save();
     ctx.translate(x, G.fy(y));
-    paint_gear(ctx, base, this.R, "hex", 0, this.Rp, this.teeth,
+    // The blank is a disc out to the root circle, so the teeth stand proud of it
+    // exactly the way a cut gear does.
+    paint_gear(ctx, base, this.tooth_inner_r, "disc", 0, this.Rp, this.teeth,
                this.tooth_inner_r, this.tooth_outer_r, this.angle, extra,
                this.is_spring() ? _SPRING_OPTS : _PLAIN_OPTS);
     if (this.is_spring()) paint_spring_spiral(ctx, this.Rp, this.angle, this.wind || 0);
@@ -1269,7 +1298,7 @@ class HexGearTile extends TileBase {
       ctx.fillStyle = T.amber; ctx.fill();
       ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 1; ctx.stroke();
     }
-    if (this.is_driver) paint_motor_badge(ctx, -this.R * 0.55, this.R * 0.55, Math.max(4, this.R * 0.17));
+    if (this.is_driver) paint_motor_badge(ctx, -this.Rp * 0.52, this.Rp * 0.52, Math.max(4, this.Rp * 0.16));
     ctx.restore();
     if (this.locked) draw_lock_x(x, y, this.R);
     if (this.is_spring()) {
@@ -1296,7 +1325,6 @@ class TriGearTile extends TileBase {
     for (let k = 0; k < 3; k++) { const a = a0 + k*TAU/3 + Math.PI/2; v.push([x + r*Math.cos(a), y + r*Math.sin(a)]); }
     return v;
   }
-  vertex_points_world() { return this.triangle_vertices_world(); }
   draw() {
     const x = this.pos[0], y = this.pos[1], ctx = G.ctx;
     const R = this.Rp_small * 1.5;
@@ -1343,7 +1371,6 @@ class RackTile extends TileBase {
   }
   contains(p) { const l = this.local(p); return Math.abs(l[0]) <= this.len*0.5 && Math.abs(l[1]) <= this.thick*2.2; }
   hit_radius() { return this.len*0.5; }
-  vertex_points_world() { return []; }
   draw() {
     const ctx = G.ctx, u = this.dir(), h = this.len * 0.5, th = this.thick;
     const base = T.alloyRack;
@@ -1366,8 +1393,12 @@ class RackTile extends TileBase {
     }
     ctx.fillStyle = shadeHex(base, 1.16); ctx.fill();
     ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 0.9; ctx.stroke();
-    // milled bar body
-    G.roundRect(-h, -th, this.len, th * 2, 3);
+    // Milled bar body with a see-through slot down the longitudinal centreline.
+    // Both outlines go into one path so the slot is punched, not painted.
+    ctx.beginPath();
+    G.addRoundRect(-h, -th, this.len, th * 2, 3);
+    const slotH = th * 0.66, slotL = this.len - th * 4;
+    if (slotL > th) G.addRoundRect(-slotL / 2, -slotH / 2, slotL, slotH, slotH / 2);
     ctx.fillStyle = _gradC("RK" + _q(th), () => {
       const g = ctx.createLinearGradient(0, -th, 0, th);
       g.addColorStop(0, shadeHex(base, T.facetLight));
@@ -1375,11 +1406,16 @@ class RackTile extends TileBase {
       g.addColorStop(1, shadeHex(base, T.facetDark));
       return g;
     });
-    ctx.fill();
+    ctx.fill("evenodd");
     ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 1.5; ctx.stroke();
-    // engraved centreline + the two pitch lines the teeth stand on
-    ctx.beginPath(); ctx.moveTo(-h + 4, 0); ctx.lineTo(h - 4, 0);
-    ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 1; ctx.stroke();
+    // a lit lip along the slot's upper edge so it reads as cut through
+    if (slotL > th) {
+      ctx.beginPath();
+      ctx.moveTo(-slotL / 2 + slotH / 2, -slotH / 2);
+      ctx.lineTo(slotL / 2 - slotH / 2, -slotH / 2);
+      ctx.strokeStyle = "rgba(255,255,255,0.16)"; ctx.lineWidth = 1; ctx.stroke();
+    }
+    // the two pitch lines the teeth stand on
     ctx.beginPath();
     ctx.moveTo(-h, -th); ctx.lineTo(h, -th); ctx.moveTo(-h, th); ctx.lineTo(h, th);
     ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.lineWidth = 1; ctx.stroke();
@@ -1414,7 +1450,6 @@ class RingGearTile extends TileBase {
   friction_b(rp_ref) { const s = rp_ref <= 1e-9 ? 1 : Math.pow(this.outer_pr/rp_ref, FRICTION_B_SCALE_R); return DAMPING.friction*s; }
   hit_radius() { return this.outer_pr*1.02; }
   contains(p) { const d = dist(this.pos, p); return d <= this.outer_pr*1.06 && d >= this.inner_pr*0.78; }  // the rim, not the hole
-  vertex_points_world() { return []; }
   // Filled teeth standing on one of the pitch circles.
   _teeth_on(ctx, radius, inward) {
     const cp = this.module * Math.PI;
@@ -1438,6 +1473,8 @@ class RingGearTile extends TileBase {
   draw() {
     const ctx = G.ctx, base = T.alloyRing;
     const ri = this.inner_pr, ro = this.outer_pr;
+    const nSlot = clampf(Math.round(TAU * ((ri + ro) / 2) / (ro - ri) / 1.55), 6, 16) | 0;
+    const body = ring_body_path(ri, ro, nSlot);
     ctx.save();
     ctx.translate(this.pos[0], G.fy(this.pos[1]));
     // teeth first, under the rim, so the rim edge cuts them cleanly
@@ -1445,29 +1482,25 @@ class RingGearTile extends TileBase {
     this._teeth_on(ctx, ro, false);
     this._teeth_on(ctx, ri, true);
     ctx.restore();
-    // annular rim: outer disc with the bore punched see-through
-    ctx.beginPath();
-    ctx.arc(0, 0, ro, 0, TAU);
-    ctx.moveTo(ri, 0); ctx.arc(0, 0, ri, 0, TAU);
-    ctx.fillStyle = plate_fill(ctx, base, ro); ctx.fill("evenodd");
-    ctx.fillStyle = plate_spec(ctx, base, ro); ctx.fill("evenodd");
-    // bevels on both edges of the rim
+    // Body. The slots turn with the ring but the light does not, so clip in the
+    // rotated frame, then rotate back before painting the fixed-direction fills.
+    ctx.save();
+    ctx.rotate(-this.angle);
+    ctx.clip(body, "evenodd");
+    ctx.rotate(this.angle);
+    ctx.fillStyle = plate_fill(ctx, base, ro); ctx.fillRect(-ro, -ro, 2 * ro, 2 * ro);
+    ctx.fillStyle = plate_spec(ctx, base, ro); ctx.fillRect(-ro, -ro, 2 * ro, 2 * ro);
+    ctx.restore();
+    // engraved edges on every opening, including the slots
+    ctx.save(); ctx.rotate(-this.angle);
+    ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.lineWidth = 2; ctx.stroke(body);
+    ctx.strokeStyle = ca(liftHex(base, 0.4), 0.35); ctx.lineWidth = 1; ctx.stroke(body);
+    ctx.restore();
+    // rim bevels
     ctx.beginPath(); ctx.arc(0, 0, ro, 0, TAU);
     ctx.strokeStyle = bevel_stroke(ctx, ro); ctx.lineWidth = 2; ctx.stroke();
-    ctx.beginPath(); ctx.arc(0, 0, ri, 0, TAU);
-    ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 2; ctx.stroke();
     ctx.beginPath(); ctx.arc(0, 0, ri + 1.5, 0.6 * Math.PI, 1.6 * Math.PI);
-    ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 1.2; ctx.stroke();
-    // registration marks milled across the rim so the hoop reads as turning
-    ctx.save(); ctx.rotate(-this.angle);
-    ctx.beginPath();
-    for (const m of [0, TAU / 3, 2 * TAU / 3]) {
-      ctx.moveTo(ri * Math.cos(m), ri * Math.sin(m));
-      ctx.lineTo(ro * Math.cos(m), ro * Math.sin(m));
-    }
-    ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 3; ctx.stroke();
-    ctx.strokeStyle = ca(liftHex(base, 0.4), 0.55); ctx.lineWidth = 1.2; ctx.stroke();
-    ctx.restore();
+    ctx.strokeStyle = "rgba(255,255,255,0.16)"; ctx.lineWidth = 1.2; ctx.stroke();
     ctx.restore();
     if (this.locked) draw_lock_x(this.pos[0], this.pos[1], this.outer_pr * 0.5);
   }
