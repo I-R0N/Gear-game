@@ -20,6 +20,11 @@ ratio *that stage* contributes, driving-to-driven, which is the number you are a
 choosing between while you build. Hovering a gear, or carrying one near a mesh it could
 make, shows those chips in any mode.
 
+A level is won when its targets are **driven** to their goal, not merely moving: a gear cut
+loose from its motor coasts for about a second, and that was long enough to win a level off
+a machine you had already taken apart. Every goal now reads the ratio solve rather than the
+current motion, so a correct build is acknowledged on the frame the last part lands.
+
 **▶ [Play the current build](https://i-r0n.github.io/Gear-game/)**
 
 No build step and no runtime dependencies: open `gear_works.html` in a browser, or serve

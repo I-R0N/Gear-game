@@ -94,6 +94,54 @@ window.__L = {
     return this.report(idx);
   },
 
+  // Degenerate placement 3, and the one a player actually found: WIN OFF A COAST.
+  //
+  // A gear cut loose from its motor does not stop, it spins down over about a second.
+  // That is long enough to spin a target up, unhook the gear feeding it, and hook the
+  // parts onto a second target while the first is still turning — collecting a win for
+  // a machine that no longer exists. It is worst on multi-target levels, where the
+  // trick is a relay, but the underlying hole is the same everywhere: "this target is
+  // moving" is not "this target is driven".
+  //
+  // So: solve the level, run it up to speed, then cut the train by lifting the part
+  // nearest the motor clean off the board, and look at every frame of the coast-down.
+  // No target may report itself satisfied at any point in it.
+  //
+  // Wind goals are exempt by design — a wound spring stays wound whether or not the
+  // train that wound it is still attached, which is a stored state and not a coast.
+  coast(idx) {
+    const g = this.g(), lv = this.levels()[idx];
+    this.solve(idx);
+    const won = g.win;
+    const targets = g.tile_list.filter(t => t.role === "driven");
+    const wind = targets.some(t => (t.spec || {}).wind_turns !== undefined);
+    // the placed part closest to the drive: cutting it strands everything downstream
+    const drive = g.tile_list.find(t => t.role === "drive");
+    const placed = g.tile_list.filter(t => !t.anchored && t.drive_ratio != null);
+    let cut = null, best = Infinity;
+    for (const t of placed) {
+      const d = Math.hypot(t.pos[0]-drive.pos[0], t.pos[1]-drive.pos[1]);
+      if (d < best) { best = d; cut = t; }
+    }
+    if (!cut) return { won, wind, cut: false, everOk: false, frames: 0, stillMoving: 0 };
+    // lift it right off the board, the way a player drags a part away
+    cut.pos = [g.origin[0] + g.Rp2 * 900, g.origin[1] + g.Rp2 * 900];
+    if (cut.partner) cut.partner.pos = cut.pos.slice();
+    g._mark_dirty();
+    // Walk the whole coast-down. everOk is the bug: any frame on which every target
+    // reports satisfied is a frame the win check would have fired on.
+    let everOk = false, frames = 0, stillMoving = 0;
+    for (let f = 0; f < 240; f++) {
+      g.update(1/60);
+      frames++;
+      const moving = targets.filter(t => Math.abs(t.omega) > 2e-3).length;
+      stillMoving = Math.max(stillMoving, moving);
+      if (targets.length && targets.every(t => g.target_ok(t))) { everOk = true; break; }
+      if (!moving) break;                    // everything has stopped; the window is over
+    }
+    return { won, wind, cut: true, everOk, frames, stillMoving };
+  },
+
   // Degenerate placement 2: dump the whole inventory around the motor in a rosette
   // -- the "hang everything off the drive and hope" move. Starts pointing away from
   // the board so it is a genuine dump rather than an accidental solution, and must

@@ -205,6 +205,10 @@ Each of these is an assertion in `npm test`, run against all twenty levels every
   6 and 13, which declare `naive_solves` — there the obvious chain *is* the answer, and
   the suite asserts it works, because a tutorial that punishes the obvious move is a bad
   tutorial.
+* **No winning off a coast.** The level is solved, then the part nearest the motor is
+  lifted clean off the board, and every frame of the resulting spin-down is checked: no
+  target may report itself satisfied on any of them. See below — this was real on sixteen
+  of the twenty levels.
 * **No spring soft-lock.** A barrel that reaches its hard stop while the motor still
   drives it holds the train at zero for good. Every wind goal is proved to be reached
   strictly before that point.
@@ -246,14 +250,47 @@ Where it stands, at both 1280×800 and 390×844:
 
 ```
 tolerance   levels
-0.60        1, 3, 6, 7, 10, 13, 15, 16, 17, 19, 20   (and 5, 8 on mobile)
-0.45        2, 4, 5, 8, 9, 11, 12, 18
-0.30        14
+0.60        1, 3, 6, 7, 10, 13, 15, 16, 17, 19, 20
+0.45        2, 5, 8, 9, 11, 12, 18
+0.30        4, 14
 ```
 
-Nothing needs a near-exact drop. The two spring levels take 2.8s and 3.1s to register,
-which is the mechanic rather than a defect — you are watching a barrel fill, and it has a
-progress arc and a live turns readout while you do.
+Nothing needs a near-exact drop, and every level except the two spring ones acknowledges
+the win on the **frame the last part lands** — nought frames, not "quickly". The two spring
+levels take 2.6s and 3.8s, which is the mechanic rather than a defect: you are watching a
+barrel fill, and it has a progress arc and a live turns readout while you do.
+
+## Winning off a coast
+
+A player found this, and it is the best bug in the campaign: *spin a gear up, pull out the
+gear that was feeding it, and hook the parts onto the next target while the first one is
+still turning.* Both targets are moving, so the level pays out — for a machine that no
+longer exists.
+
+The hole was that `target_ok` read `t.omega`, and a gear cut loose from its motor does not
+stop, it coasts down over about a second. "This target is moving" is not "this target is
+driven", and the ratio solver already knew the difference: it stamps `drive_ratio`, which
+is null for every part of a component with no motor in it. The score had been using exactly
+that fact all along to decide which parts count. The win check now asks the same question.
+
+Measured with the guard removed: **sixteen of the twenty levels** could be won off a coast,
+not just the multi-target ones. It also turned out to be firing by accident during ordinary
+play — level 4's playthrough tolerance was reported as 0.45, but at 0.45 the second target
+is never connected at all; it had been brushed by a passing gear during the drag and was
+coasting. Its real tolerance was always 0.30, and the number above is now the true one.
+
+Two goals needed more than the driven test:
+
+* **Ratio goals** compare `drive_ratio` to `drive_ratio` rather than speed to speed. The two
+  are identical on a settled train, but the first is fixed by geometry and so is exact on
+  the frame the last gear lands. Both ends must also hang off the *same* motor, or the
+  comparison is between two unrelated machines turning at a flattering pair of speeds.
+* **Speed-bounded goals** — level 15 is the only one — read a solved steady state instead of
+  the current speed. At steady state the acceleration is zero, so `T_drive + T_spring =
+  (B_eff + B_motor) · ω` rearranges to one division. This matters in both directions: a
+  train decaying from a coast passes through *any* band on its way down, and the honest
+  build no longer has to wait for the servo to converge. Level 15 reads −8.62 rpm on frame
+  one and settles at −8.62 rpm; it used to take 22 frames to admit it.
 
 ## What was cut
 

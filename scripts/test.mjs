@@ -142,6 +142,18 @@ for (let i = 0; i < LEVELS.length; i++) {
   }
   check(`${label} needs all ${lv.solution.length} of its parts`, bad.length === 0,
     "still wins without " + bad.join(", "));
+  // A player found this one: spin a target up, cut the gear feeding it, and cash the
+  // win while it is still coasting. Cut the train and watch every frame of the
+  // spin-down — no target may report satisfied on any of them.
+  const coast = await page.evaluate((i) => window.__L.coast(i), i);
+  check(`${label} cannot be won off a coasting gear`,
+    coast.wind || coast.everOk === false,
+    JSON.stringify(coast));
+  // ...and the check above only means anything if the parts really were still turning.
+  if (!coast.wind) {
+    check(`${label} coast test is real: targets were still turning after the cut`,
+      coast.stillMoving > 0, JSON.stringify(coast));
+  }
 }
 
 // Direction is part of several goals, and a gear advancing more than half a tooth
