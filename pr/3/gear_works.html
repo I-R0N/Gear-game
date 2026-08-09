@@ -2024,16 +2024,42 @@ class Game {
   // and nothing is read out of the draw path.
   target_ok(t) {
     const s = t.spec || {};
+    // A wound spring is stored state, not motion — it stays wound whether or not the
+    // train that wound it is still attached, so this one is asked before the rest.
     if (s.wind_turns !== undefined) return Math.abs(t.wind || 0) / TAU >= s.wind_turns - 1e-9;
+    // THE TARGET MUST BE DRIVEN, not merely moving. A gear spun up and then cut loose
+    // coasts for about a second, which is long enough to unhook it, hook something
+    // else up, and collect a win off a machine that no longer exists. `drive_ratio` is
+    // null for every part of a component with no motor in it, so this is the solver's
+    // own answer to "is there a live path from a motor to here" — the same answer the
+    // score already uses to decide which parts count.
+    if (t.drive_ratio == null) return false;
+    // ...and the train must be being driven to turn, not just connected to a stopped
+    // motor or held at a fully wound spring's stop.
     if (!(Math.abs(t.omega) > WIN_SPIN_EPS)) return false;
+    if (!(Math.abs(t.steady_omega) > WIN_SPIN_EPS)) return false;
     if (s.spin !== undefined && Math.sign(t.omega) !== Math.sign(s.spin)) return false;
-    const rpm = Math.abs(omega_to_rpm(t.omega));
-    if (s.min_rpm !== undefined && rpm < s.min_rpm) return false;
-    if (s.max_rpm !== undefined && rpm > s.max_rpm) return false;
+    // The one goal that reads a SPEED rather than a ratio, and so the one that has to
+    // care where the train settles: a train decaying from a coast passes through any
+    // band on its way down. Reading the solved steady state instead of the current
+    // speed makes it exact on the first frame — no false positive in passing, and no
+    // waiting for the servo to converge either.
+    if (s.min_rpm !== undefined || s.max_rpm !== undefined) {
+      const rpm = Math.abs(omega_to_rpm(t.steady_omega));
+      if (s.min_rpm !== undefined && rpm < s.min_rpm) return false;
+      if (s.max_rpm !== undefined && rpm > s.max_rpm) return false;
+    }
     if (s.ratio) {
       const o = this._anchor(s.ratio.of);
-      if (!o || !(Math.abs(o.omega) > WIN_SPIN_EPS)) return false;
-      const got = t.omega / o.omega, want = s.ratio.value;
+      // Both ends must hang off the SAME motor, or the comparison is between two
+      // unrelated machines that happen to be turning at a flattering pair of speeds.
+      if (!o || o.drive_ratio == null || o.drive_id !== t.drive_id) return false;
+      if (!(Math.abs(o.omega) > WIN_SPIN_EPS) || Math.abs(o.drive_ratio) < 1e-12) return false;
+      // Straight out of the solve. `drive_ratio` is fixed by geometry, so this is the
+      // pair's true ratio on the frame the last gear lands — identical to omega/omega
+      // on a settled train, and immune to what either gear happens to be doing while
+      // it gets there.
+      const got = t.drive_ratio / o.drive_ratio, want = s.ratio.value;
       if (Math.abs(got - want) > Math.abs(want) * (s.ratio.tol !== undefined ? s.ratio.tol : 0.02)) return false;
     }
     return true;
@@ -2718,7 +2744,10 @@ class Game {
   }
   _apply_drive_dynamics(dt) {
     const graph = this._graph; const nodes = [...graph.keys()];
-    for (const t of this.tile_list) t.drive_ratio = null;   // anything off the graph is off the train
+    // Anything off the graph is off the train. `drive_id` names WHICH motor, so two
+    // targets can only be compared to each other when they hang off the same one, and
+    // `steady_omega` is where this train is heading rather than where it is right now.
+    for (const t of this.tile_list) { t.drive_ratio = null; t.drive_id = null; t.steady_omega = 0; }
     for (const t of nodes) t.locked = false;
     const gain = DRIVE_SERVO_GAIN; const visited = new Set();
     for (const start of nodes) {
@@ -2750,6 +2779,13 @@ class Game {
         T_spring += -SPRING_K * s.wind * ks;
         B_eff += DAMPING.spring * ks * ks;   // internal spring loss (settles the unwind)
       }
+      // Where this train ENDS UP, solved rather than waited for. At steady state the
+      // acceleration is zero, so T_drive + T_spring = (B_eff + B_motor) * omega, and
+      // that rearranges to one division. A win condition on a speed can read this on
+      // the first frame instead of watching the servo converge — and, unlike the
+      // instantaneous speed, it is not something a coasting gear can be carrying.
+      const B_total = B_eff + B_motor;
+      const omega_ss = !freewheel && B_total > 1e-9 ? (T_drive + T_spring) / B_total : 0;
       let num = 0, den = 0;
       for (const t of comp) { const k = ratios.get(t); num += t.omega*k; den += k*k; }
       let omega_ref = den > 1e-9 ? num/den : 0;
@@ -2795,6 +2831,8 @@ class Game {
       for (const t of comp) {
         const k = ratios.get(t);
         t.drive_ratio = known ? k / kd : null;
+        t.drive_id = known ? d0.uid : null;
+        t.steady_omega = fullyWound ? 0 : k * omega_ss;
         t.omega = k * omega_ref; t.locked = false;
         const raw = Math.abs(k) > 1e-9 ? tau_ref / k : 0;
         t.torque = t.torque * 0.82 + raw * 0.18;   // light smoothing so the readout is steady
