@@ -605,6 +605,14 @@ const T = {
   alloyU4:   "#AC4D63",
   alloyU5:   "#5062B4",
   alloySP:   "#3F8A57",
+  // --- alloy (role-coded; campaign anchors only) ----------------
+  // The board's fixtures. A level's motor and its targets are bolted down and are
+  // not yours to move, so they are cast in their own metal rather than borrowing the
+  // size palette from the loose stock in the tray — one look tells you what you can
+  // pick up. Hue follows the language the rings and labels already use: amber drives,
+  // green is the thing being asked for.
+  alloyDrive:  "#8E6A16",
+  alloyDriven: "#256F52",
   alloyRack: "#5B6580",
   alloyRing: "#2F7F6E",
   alloyRod:  "#D2A24A",
@@ -677,6 +685,17 @@ const ALLOY = {
   U1: T.alloyU1, U2: T.alloyU2, U3: T.alloyU3, U4: T.alloyU4, U5: T.alloyU5,
   SP: T.alloySP, RK: T.alloyRack, RG: T.alloyRing,
 };
+// What metal is this part cast from? Size normally, ROLE if the campaign has bolted
+// it to the board. A spring keeps its own alloy either way: its coil already runs
+// green -> amber -> red to show how far it is wound, and a green plate under a green
+// coil would take that reading away.
+function alloy_for(t) {
+  if (t.role && !t.is_spring()) {
+    if (t.role === "drive") return T.alloyDrive;
+    if (t.role === "driven") return T.alloyDriven;
+  }
+  return ALLOY[t.label] || T.alloyU2;
+}
 
 const FONT = T.fontSans;
 const RPM_FONT_SIZE = 12;
@@ -1301,11 +1320,10 @@ function local_windows(pitch_r, angle, tooth_inner_r, extraR) {
 //   rot    plate rotation (triangles rotate, hex plates are fixed)
 function paint_gear(ctx, base, R, kind, rot, pitch_r, teeth, ri, ro, angle, extraWinR, opts) {
   opts = opts || {};
-  // --- contact crescent: depth without covering the see-through windows ---
-  ctx.beginPath();
-  ctx.arc(0.5, 2.6, ro - 0.5, 0.16 * Math.PI, 0.86 * Math.PI);
-  ctx.strokeStyle = "rgba(0,0,0,0.45)";
-  ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.stroke(); ctx.lineCap = "butt";
+  // No cast shadow. Every gear used to trail a dark crescent under its lower edge,
+  // which is fine on one gear and a mess on twenty overlapping ones — a compound
+  // train stacks four of them into a smear that reads as dirt rather than depth.
+  // The bevel, the engraved root circle and the punched windows carry the relief.
 
   // --- plate with rotating windows (even-odd = real see-through holes) ---
   const nWin = local_windows(pitch_r, angle, ri, extraWinR || 0);
@@ -1558,7 +1576,7 @@ class HexGearTile extends TileBase {
   hit_radius() { return this.R*0.95; }
   draw() {
     const x = this.pos[0], y = this.pos[1], ctx = G.ctx;
-    const base = ALLOY[this.label] || T.alloyU2;
+    const base = alloy_for(this);
     // A stacked gear gets a big central window so the OTHER gear on the shaft
     // reads clearly — vital when a large gear rides on a small one.
     const extra = this.partner ? this._central_window_r() : 0;
@@ -1602,20 +1620,18 @@ class TriGearTile extends TileBase {
   }
   set_pitch(rp) { this.Rp_small = rp; this.tooth_inner_r = rp*0.82; this.tooth_outer_r = rp*1.12; }
   pitch_r() { return this.Rp_small; }
+  // Still generous relative to the body: this is the smallest part on the board and
+  // the one most often being picked up off a shaft, so the grab target does not
+  // shrink just because the plate behind it did.
   hit_radius() { return this.Rp_small*1.25; }
-  triangle_vertices_world() {
-    // Equilateral triangle centred on pos, rotating with the gear.
-    const r = this.Rp_small*1.5, x = this.pos[0], y = this.pos[1], a0 = this.angle;
-    const v = [];
-    for (let k = 0; k < 3; k++) { const a = a0 + k*TAU/3 + Math.PI/2; v.push([x + r*Math.cos(a), y + r*Math.sin(a)]); }
-    return v;
-  }
   draw() {
     const x = this.pos[0], y = this.pos[1], ctx = G.ctx;
-    const R = this.Rp_small * 1.5;
     ctx.save();
     ctx.translate(x, G.fy(y));
-    paint_gear(ctx, T.alloyU1, R, "tri", this.angle, this.Rp_small, this.teeth,
+    // A disc out to the root circle, the same blank every other gear is cut from.
+    // It used to be a triangular plate 1.5x the pitch radius — a leftover from the
+    // hex-plate era, and the only part still wearing a shape instead of a size.
+    paint_gear(ctx, alloy_for(this), this.tooth_inner_r, "disc", 0, this.Rp_small, this.teeth,
                this.tooth_inner_r, this.tooth_outer_r, this.angle, 0, _PLAIN_OPTS);
     if (this.is_driver) paint_motor_badge(ctx, 0, this.Rp_small * 0.9, Math.max(4, this.Rp_small * 0.26));
     ctx.restore();
@@ -4188,7 +4204,7 @@ const CHROME = {
 };
 
 // Expose for headless testing
-if (typeof globalThis !== "undefined") globalThis.__GW = { Game, G, tri_to_screen, rpm_to_omega, omega_to_rpm, LEVELS, readouts: _roPlaced, chips: _chipBoxes,
+if (typeof globalThis !== "undefined") globalThis.__GW = { Game, G, tri_to_screen, rpm_to_omega, omega_to_rpm, LEVELS, readouts: _roPlaced, chips: _chipBoxes, alloy_for,
                                                 LEVEL_BOX, SPRING_MAX_WIND, WIN_REVEAL_DELAY };
 
 // ============================================================
