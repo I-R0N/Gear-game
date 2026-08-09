@@ -132,9 +132,53 @@ motor** by default in the campaign — `1 : 1`, `1 : 2.5`, `1 : 10`, `1 : 30` do
 compound train — taken straight out of the ratio solve, which means they are exact from
 the first frame while the rpm numbers are still moving.
 
-A rail button cycles **Ratio / Speed / Off**. Speed is the rpm-and-torque pair (and the
-free-play default, because the bench is where torque matters); Off is there because the
-pills are a lot of furniture on a small screen.
+A rail button cycles **Ratio / Mesh / Speed / Off**. Speed is the rpm-and-torque pair (and
+the free-play default, because the bench is where torque matters); Off is there because
+the pills are a lot of furniture on a small screen.
+
+**Mesh** answers a different question. Ratio-to-motor tells you where a wheel has ended
+up; it does not tell you what any one *stage* contributed, and a compound train is built
+one stage at a time. Mesh mode drops the per-wheel pills entirely and labels the meshes
+instead — a small chip on the line between two engaged gears reading `4.0 : 1` or
+`1 : 2.5`, oriented by power flow, so the number always reads *driving : driven*. Level 12
+in Mesh mode is three chips: `4.0 : 1`, `3.0 : 1`, `5.0 : 1`. That is the level's whole
+lesson on one screen, and it is what the pills could never show.
+
+Direction comes from a breadth-first rank over the ratio graph out of the drive, so a
+stage is labelled by which of its two wheels is nearer the motor rather than by which
+happens to be larger. A stage that speeds up reads `1 : x`; one that reduces reads `x : 1`.
+
+Two things surface mesh chips regardless of mode, because they answer a question you are
+asking *right now*:
+
+* **Hovering** a placed gear chips every mesh it is part of.
+* **Carrying** a part chips the meshes it *would* make, for any gear within four mesh
+  tolerances of the part in hand. You see the ratio a placement buys before you commit to
+  it, which is the point at which the number is worth most. This is only possible because
+  a mesh ratio is the pair's tooth ratio — it needs no running train and no settled solve,
+  so it is correct for a mesh that does not exist yet.
+
+  The preview **fades in** rather than popping: brightness ramps with how close the part is
+  to tangency, so carrying a gear across a crowded board reads as one number getting
+  brighter instead of six flashing on and off. Only the four nearest to tangency are drawn
+  at all, and the part in hand drops its own readout pill while it is held — that pill says
+  `— / 0 rpm`, which is true and useless, and it was sitting exactly where the chip needed
+  to be.
+
+Chips are placed rather than merely positioned: a chip starts on its mesh normal, out past
+the smaller of the two gears, and if that lands on a readout pill or on a chip already
+down it takes the other side of the line and then walks outward. It never leaves its own
+mesh line, so a chip that has to move cannot end up annotating a mesh it is not about. The
+pills are available to dodge because readouts draw first and chips draw last — which is
+also why a chip is never half-hidden behind one.
+
+A second rail button, **Detail**, sets the scope: **Key** shows the drive and the target
+only — enough to answer "am I there yet" without burying the board — and **All** shows
+every part in the train. It defaults off the viewport rather than the mode, because the
+constraint is screen area: All on desktop, Key on a phone, and one click either way in
+both. It used to be a hard rule keyed to the viewport with no way out, which is exactly
+the wrong shape — a 20-part train on a laptop is as cluttered as a 4-part one on a phone,
+and the player is the only one who knows which they are reading.
 
 ## The rules every level is held to
 

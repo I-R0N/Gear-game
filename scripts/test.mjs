@@ -393,6 +393,41 @@ console.log("\ninteraction through the chrome layer");
     scroll.rows === 21 && scroll.scrollable && scroll.hit && !scroll.zoomChanged,
     JSON.stringify(scroll));
 
+  // 4c. the mobile dock is wider than the screen — 93px in a level, 997px in free
+  // play — and had exactly the same defect as the title list: overflow-x:auto on an
+  // element that cannot receive a pointer. Checked at 390px, in both modes.
+  {
+    const mp = await openPage(browser, { file: FILE, width: 390, height: 844, dpr: 1 });
+    await mp.addScriptTag({ content: preamble });
+    for (const [mode, how] of [["puzzle", () => window.__GW.game.start_level(19)],
+                               ["free", () => window.__GW.game.start_free_play()]]) {
+      await mp.evaluate(how);
+      await mp.evaluate(() => window.__GW.step(3, 1 / 60));
+      await mp.waitForTimeout(320);
+      const d = await mp.evaluate(() => {
+        const el = document.getElementById("rail"), cs = getComputedStyle(el);
+        const fade = document.getElementById("railfade");
+        const before = el.scrollLeft;
+        const fade0 = getComputedStyle(fade).opacity;
+        el.scrollLeft = 9999;
+        el.dispatchEvent(new Event("scroll"));
+        return { over: el.scrollWidth - el.clientWidth, hit: cs.pointerEvents !== "none",
+                 moved: el.scrollLeft > before, snap: cs.scrollSnapType !== "none",
+                 fade0: +fade0, want: fade.style.opacity };
+      });
+      // the fade is a 140ms transition, so the computed value has to be read after it
+      await mp.waitForTimeout(240);
+      d.fade1 = await mp.evaluate(() => +getComputedStyle(document.getElementById("railfade")).opacity);
+      check(`mobile ${mode} dock scrolls its ${d.over}px of overflow`,
+        d.over <= 0 || (d.hit && d.moved), JSON.stringify(d));
+      // The fade is the only thing telling a thumb there is more dock off-screen, and
+      // the only thing that must not sit over the last button once there isn't.
+      check(`mobile ${mode} dock fades its scrolling edge, and stops at the end`,
+        d.over <= 0 ? d.fade0 === 0 : (d.fade0 === 1 && d.fade1 === 0), JSON.stringify(d));
+    }
+    await mp.close();
+  }
+
   // 5. a title-screen level row starts that level
   await ip.evaluate(() => { window.__GW.game.enter_main_menu(); window.__GW.step(2, 1 / 60); });
   await ip.waitForTimeout(120);
@@ -471,6 +506,59 @@ console.log("\ninteraction through the chrome layer");
   check("the camera re-frames onto the solved mechanism",
     won.cam.some((v, i) => Math.abs(v - cam0[i]) > 1),
     `before ${cam0.map((v) => v.toFixed(1))} after ${won.cam.map((v) => v.toFixed(1))}`);
+
+  // 6a2. mesh ratio chips: on every mesh in Mesh mode, and — the useful bit —
+  // PROSPECTIVELY on whatever the part in your hand would mesh with if you dropped
+  // it here. That preview is only possible because a mesh ratio is the pair's tooth
+  // ratio, so it needs no running train and no settled solve.
+  {
+    const chips = await ip.evaluate(() => {
+      const g = window.__GW.game, out = {};
+      const count = () => { window.__GW.render(); return g._chips; };
+      g.readout_mode = "ratio"; g.drag_tile = null; g._hover_tile = null;
+      out.ratioIdle = count();
+      g.readout_mode = "mesh";
+      out.meshAll = count();
+      // now pick a loose part up and hold it just off a tangency it could take
+      g.readout_mode = "ratio";
+      const t = g.tile_list.find((x) => !x.anchored && x.drive_ratio != null);
+      const o = g.tile_list.find((x) => x !== t && x.anchored);
+      const R = t.pitch_r() + o.pitch_r();
+      g.drag_tile = t; g.dragging = true;
+      const hold = (k) => {
+        t.pos = [o.pos[0] + R * k, o.pos[1]];
+        const n = count();
+        const mine = window.__GW.chips.slice();
+        return { n, a: Math.max(0, ...mine.map((c) => c.a)) };
+      };
+      const near = hold(0.995);                       // all but touching
+      const far = hold(1 + (g.mesh_tol * 3.4) / R);   // out near the edge of the band
+      out.holding = near.n;
+      out.nearAlpha = +near.a.toFixed(3);
+      out.farAlpha = +far.a.toFixed(3);
+      // the part in hand must not also be flying its own "— / 0 rpm" pill
+      t.pos = [o.pos[0] + R * 0.995, o.pos[1]];
+      count();
+      out.heldPill = window.__GW.readouts.some((p) => p.t === t);
+      // and no chip may land on a pill
+      out.overlap = window.__GW.chips.some((c) => window.__GW.readouts.some((p) =>
+        Math.abs(p.cx - c.cx) < (p.bw + c.w) / 2 && Math.abs(p.cy - c.cy) < (p.bh + c.h) / 2));
+      g.drag_tile = null; g.dragging = false;
+      return out;
+    });
+    check("Mesh mode labels every mesh; Ratio mode labels none until you reach for one",
+      chips.ratioIdle === 0 && chips.meshAll >= 2, JSON.stringify(chips));
+    check("a part in hand previews the ratio it would create",
+      chips.holding >= 1, JSON.stringify(chips));
+    // The fade is the whole reason carrying a part across a crowded board is not a
+    // strobe of numbers: brightness has to mean "how close this mesh is to being real".
+    check("the in-hand preview fades in as the part approaches tangency",
+      chips.nearAlpha > 0.9 && chips.farAlpha < 0.35 && chips.farAlpha > 0,
+      JSON.stringify({ near: chips.nearAlpha, far: chips.farAlpha }));
+    check("the part in hand drops its own readout pill instead of talking over the chip",
+      chips.heldPill === false, JSON.stringify(chips));
+    check("no mesh chip lands on a readout pill", chips.overlap === false, JSON.stringify(chips));
+  }
 
   // 6b. the reported "false positive": drop the last gear correctly, then grab it
   // again during the 0.85s before the sheet appears. The board must stay live and

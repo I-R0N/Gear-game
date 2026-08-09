@@ -14,7 +14,11 @@ a real escapement — is in [`CLOCK.md`](CLOCK.md).
 Every level ships more parts than its answer needs and scores out of three stars on how
 few you use. The floating readouts show each wheel's **ratio to the motor**, taken out of
 the ratio solve rather than inferred from the rpm, so they are exact before the train has
-finished settling; a rail button cycles them between Ratio, Speed and Off.
+finished settling; a rail button cycles them between Ratio, **Mesh**, Speed and Off, and a
+second sets how much of the board they cover. Mesh mode labels each engaged pair with the
+ratio *that stage* contributes, driving-to-driven, which is the number you are actually
+choosing between while you build. Hovering a gear, or carrying one near a mesh it could
+make, shows those chips in any mode.
 
 **▶ [Play the current build](https://i-r0n.github.io/Gear-game/)**
 

@@ -194,6 +194,20 @@ covered by tests:
 - **A drag that crosses the chrome must keep tracking.** `mousemove` is bound to
   `window`, not the canvas, so dragging a part over the tool rail on its way to the
   scrap tray does not lose the part mid-flight.
+- **A `pointer-events:none` container cannot scroll, however overflowing it is.** The
+  same rule that lets drags reach the board through the chrome also swallows the scroll
+  gesture, so a container that overflows silently traps its own content: the title
+  screen's twenty-one level rows below the fold, and the mobile dock's parts beyond the
+  right edge. Both are fixed by opting the *scrolling container* back into hit-testing
+  (`#title.on`, and the dock in the mobile media query) rather than only its buttons —
+  and the dock additionally needs `touch-action:pan-x` so a horizontal swipe scrolls it
+  instead of being claimed as a board pan. Both are asserted in `npm test` by measuring
+  `scrollWidth`/`clientWidth` and the computed `pointer-events` of the container itself.
+- **A scrollable thing has to look scrollable, and then stop.** The dock fades its right
+  edge so a thumb knows there is more; the fade is driven off `scrollWidth - clientWidth -
+  scrollLeft`, so it goes away at the end of the travel instead of smearing the last
+  button, and never appears at all when the dock fits. It is re-decided on `scroll` and on
+  every rail rebuild, because a rebuilt rail is a different width and fires no scroll event.
 
 ---
 
