@@ -1,0 +1,247 @@
+# Publishes a playable build of the game to GitHub Pages.
+#
+#   main            -> https://<owner>.github.io/<repo>/
+#   pull request N  -> https://<owner>.github.io/<repo>/pr/N/
+#
+# Everything lives on one `gh-pages` branch, each target in its own directory,
+# so a PR preview never clobbers main. Closing a PR removes its directory.
+#
+# Nothing is published until `npm test` passes, so a preview link always points
+# at a build whose levels still solve and whose physics fingerprint is intact.
+#
+# One-time setup: Settings -> Pages -> Source = "Deploy from a branch",
+# branch `gh-pages`, folder `/ (root)`.
+name: Preview
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+# Per target, not global: a rapid re-push on one pull request supersedes its own
+# pending run, but two pull requests never cancel each other. GitHub keeps only
+# one pending run per group, so a single shared group would silently drop a
+# preview whenever two branches moved at once. Concurrent pushes to gh-pages are
+# handled by the retry loop in the publish step instead.
+concurrency:
+  group: preview-${{ github.event.number || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # The gate. Runs for forks too — they get test feedback even though they
+  # cannot publish. Skipped when a pull request closes, since that path only
+  # deletes a directory and there is nothing to verify.
+  test:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Level solvability, mesh/dynamics invariants, real-mouse interaction, and
+      # the physics fingerprint that keeps presentation changes presentation-only.
+      - name: npm test
+        run: npm test
+
+  preview:
+    needs: test
+    # Publish only behind a green suite. `always()` is needed so the job still
+    # runs when `test` was skipped (a closing pull request, which just cleans
+    # up) — a failed or cancelled `test` still blocks it.
+    # A pull request from a fork gets a read-only token and cannot publish.
+    if: >-
+      always() &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      # For an open PR this is the merge result, which is what a reviewer
+      # actually wants to try. For a closed one the head may be gone, so fall
+      # back to the default branch — we only need a repo to push from.
+      - name: Check out the build being previewed
+        if: github.event.action != 'closed'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check out the default branch
+        if: github.event.action == 'closed'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Work out where this build is published
+        id: target
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          EVENT: ${{ github.event_name }}
+          NUMBER: ${{ github.event.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            echo "dir=pr/$NUMBER" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          fi
+          # Pages serves the owner segment lowercased; the repo segment keeps its case.
+          LOWER_OWNER=$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "url=https://$LOWER_OWNER.github.io/$REPO" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to gh-pages
+        env:
+          DIR: ${{ steps.target.outputs.dir }}
+          CLOSED: ${{ github.event.action == 'closed' }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Different pull requests publish in parallel and all push the same
+          # branch, so a push can lose a race. Each target owns its own
+          # directory, so re-applying onto the newer tip is always conflict
+          # free — rebuild the worktree from the latest gh-pages and retry.
+          for attempt in 1 2 3 4 5; do
+            rm -rf site
+            git worktree prune
+            # A previous attempt leaves a local gh-pages branch behind, which
+            # would make the orphan checkout below fail on the retry.
+            git branch -D gh-pages >/dev/null 2>&1 || true
+
+            if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+              git fetch --no-tags --force origin gh-pages
+              git worktree add site FETCH_HEAD
+              git -C site checkout -B gh-pages
+            else
+              git worktree add --detach site
+              git -C site checkout --orphan gh-pages
+              git -C site rm -rf . >/dev/null 2>&1 || true
+            fi
+
+            if [ "$CLOSED" = "true" ]; then
+              # Only ever delete a pr/N directory — never the published main site.
+              case "$DIR" in
+                pr/[0-9]*) rm -rf "site/$DIR" ;;
+                *) echo "refusing to remove: $DIR"; exit 1 ;;
+              esac
+              MSG="preview: remove $DIR (pull request closed)"
+            else
+              mkdir -p "site/$DIR"
+              # The game is one self-contained file; index.html makes the URL clean.
+              cp gear_works.html "site/$DIR/index.html"
+              cp gear_works.html "site/$DIR/gear_works.html"
+              MSG="preview: publish $DIR from ${GITHUB_SHA::7}"
+            fi
+
+            touch site/.nojekyll   # serve files verbatim, no Jekyll pass
+
+            # Until main has published, the site root is empty and would 404.
+            # Leave a directory of whatever previews exist so the root URL is
+            # never a dead end. Regenerated while it is still the placeholder
+            # (so a closed pull request drops off the list) and replaced
+            # outright the first time main deploys its own index.html.
+            if [ ! -f site/index.html ] || grep -q gw-preview-index site/index.html; then
+              {
+                echo '<!doctype html><html lang="en"><meta charset="utf-8"><!--gw-preview-index-->'
+                echo '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                echo '<title>Gear Works — previews</title><style>'
+                echo 'body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0B0E14;'
+                echo 'color:#EAF0FA;font:15px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif}'
+                echo 'main{padding:32px;width:min(30rem,100%)}h1{font-size:24px;margin:0 0 8px}'
+                echo 'p{color:#8B98B0;margin:0 0 24px}a{display:block;padding:12px 16px;margin-bottom:8px;'
+                echo 'color:#EAF0FA;text-decoration:none;background:#1A2130;border:1px solid #2A3446;'
+                echo 'border-radius:6px}a:hover{border-color:#43526E}</style><main><h1>Gear Works</h1>'
+                echo '<p>Nothing has been published from <code>main</code> yet. Open pull request previews:</p>'
+                found=0
+                for d in site/pr/*/; do
+                  [ -d "$d" ] || continue
+                  n=$(basename "$d")
+                  printf '<a href="pr/%s/">Pull request #%s</a>\n' "$n" "$n"
+                  found=1
+                done
+                if [ "$found" = 0 ]; then echo '<p>None open right now.</p>'; fi
+                echo '</main></html>'
+              } > site/index.html
+            fi
+
+            cd site
+            git add -A
+            if git diff --cached --quiet; then
+              echo "site unchanged, nothing to push"
+              cd ..
+              break
+            fi
+            git commit -m "$MSG"
+            if git push origin HEAD:gh-pages; then
+              cd ..
+              echo "published on attempt $attempt"
+              break
+            fi
+            cd ..
+            if [ "$attempt" = "5" ]; then
+              echo "gh-pages push kept losing the race after $attempt attempts"
+              exit 1
+            fi
+            echo "push rejected (concurrent deploy), retrying"
+            sleep $((attempt * 3))
+          done
+
+      - name: Comment the preview link on the pull request
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.target.outputs.url }}/${{ steps.target.outputs.dir }}/
+          MAIN_URL: ${{ steps.target.outputs.url }}/
+        with:
+          script: |
+            const marker = '<!-- gear-works-preview -->';
+            const body = [
+              marker,
+              '### ▶ Live preview',
+              '',
+              `**[Play this build](${process.env.PREVIEW_URL})** — rebuilt from \`${context.sha.slice(0, 7)}\`.`,
+              '',
+              `Main branch: ${process.env.MAIN_URL}`,
+              '',
+              'Pointer and touch input both work in the hosted build; the page is a single',
+              'self-contained file, so it needs no network access once loaded.',
+              '',
+              '---',
+              '_Generated by [Claude Code](https://claude.ai/code)_',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const existing = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            // One sticky comment that gets edited, rather than a new one per push.
+            const mine = existing.find((c) => c.body && c.body.includes(marker));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

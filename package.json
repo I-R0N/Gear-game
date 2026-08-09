@@ -1,0 +1,25 @@
+{
+  "name": "gear-works",
+  "version": "1.0.0",
+  "description": "Gear Works — a self-contained gear-train sandbox and puzzle game.",
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "shots": "node scripts/shots.mjs",
+    "shots:before": "node scripts/shots.mjs --out shots/before --clean",
+    "shots:after": "node scripts/shots.mjs --out shots/after --clean",
+    "audit": "node scripts/audit.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/I-R0N/Gear-game.git"
+  },
+  "bugs": {
+    "url": "https://github.com/I-R0N/Gear-game/issues"
+  },
+  "homepage": "https://github.com/I-R0N/Gear-game#readme",
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  },
+  "private": true,
+  "type": "module"
+}
