@@ -132,6 +132,26 @@ for (let i = 0; i < LEVELS.length; i++) {
     "still wins without " + bad.join(", "));
 }
 
+// Direction is part of several goals, and a gear advancing more than half a tooth
+// pitch per frame strobes — its direction is genuinely unreadable, the wagon-wheel
+// effect. This is the speed limit that keeps every campaign board legible.
+console.log("\nnothing strobes");
+for (let i = 0; i < LEVELS.length; i++) {
+  const r = await page.evaluate((i) => window.__L.strobe(i), i);
+  check(`${i + 1} "${LEVELS[i].name}" spins slowly enough to read its direction`,
+    r.steady <= 0.5 + 1e-9 && r.peak <= 0.75 + 1e-9,
+    `steady ${r.steady} (${r.steadyPart})  peak ${r.peak} (${r.peakPart})  — 1.0 is ambiguous`);
+}
+
+// Readouts that drift around a board nobody is touching are the single most
+// distracting thing on screen, and the cause is subtle enough to come back.
+console.log("\nreadouts hold still");
+for (const i of [6, 11, 19]) {
+  const r = await page.evaluate((i) => window.__L.pillDrift(i), i);
+  check(`${i + 1} "${LEVELS[i].name}" — ${r.pills} readouts do not move over 4s of settling`,
+    r.drift < 0.5, JSON.stringify(r));
+}
+
 // A wound barrel that reaches its hard stop while the motor is still driving holds
 // the train at zero for good. Prove that cannot happen before the goal is met.
 console.log("\nspring soft-lock guard");

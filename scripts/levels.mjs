@@ -115,6 +115,58 @@ window.__L = {
     return this.report(idx);
   },
 
+  // Direction is a thing several levels ask the player to READ, and a gear whose
+  // teeth advance more than half a tooth pitch per frame is a gear whose direction
+  // cannot be read — it strobes, exactly like a wagon wheel in a film. Returns the
+  // worst offender's alias ratio: 1.0 is the ambiguity threshold, and anything
+  // under ~0.5 is comfortable.
+  //   alias = (deg advanced per 60fps frame) / (half a tooth pitch)
+  //         = |rpm| * teeth / 1800
+  strobe(idx) {
+    const g = this.g();
+    this.solve(idx, { frames: 1 });
+    const alias = (t) => Math.abs(t.omega * 60 / (2*Math.PI)) * t.teeth / 1800;
+    let peak = 0, worstT = null;
+    for (let f = 0; f < 60 * 12; f++) {
+      g.update(1/60);
+      for (const t of g.tile_list) {
+        if (t.is_rack()) continue;
+        const a = alias(t);
+        if (a > peak) { peak = a; worstT = t.label; }
+      }
+    }
+    let steady = 0, steadyT = null;
+    for (const t of g.tile_list) {
+      if (t.is_rack()) continue;
+      const a = alias(t);
+      if (a > steady) { steady = a; steadyT = t.label; }
+    }
+    return { peak: +peak.toFixed(3), peakPart: worstT,
+             steady: +steady.toFixed(3), steadyPart: steadyT };
+  },
+
+  // Do the floating readouts sit still on a board nobody is touching? They used to
+  // wander, because the pill's width tracked its own text and a settling train
+  // rewrites those digits every frame.
+  pillDrift(idx) {
+    const g = this.g();
+    this.solve(idx);
+    window.__GW.render();
+    const snap = () => window.__GW.readouts.map(it => [it.t.uid, it.cx, it.cy]);
+    const first = snap();
+    let worst = 0;
+    for (let f = 0; f < 240; f++) {
+      g.update(1/60); window.__GW.render();
+      const now = snap();
+      if (now.length !== first.length) return { drift: 999, note: "pill count changed" };
+      for (let i = 0; i < now.length; i++) {
+        if (now[i][0] !== first[i][0]) return { drift: 999, note: "pill order changed" };
+        worst = Math.max(worst, Math.hypot(now[i][1] - first[i][1], now[i][2] - first[i][2]));
+      }
+    }
+    return { drift: +worst.toFixed(3), pills: first.length };
+  },
+
   // Which mesh edges exist, as a sorted list of stable part keys.
   edgeKeys() {
     const g = this.g();

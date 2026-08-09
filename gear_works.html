@@ -285,6 +285,12 @@ body[data-mode="puzzle"] #topbar,body[data-mode="puzzle"] #rail,body[data-mode="
   transition:opacity var(--d-4) var(--ease-out),transform var(--d-4) var(--ease-out)}
 .screen.on .stack > *{opacity:1;transform:none}
 
+/* The chrome layer is pointer-events:none with only buttons opting back in, which
+   left the level list unscrollable — the wheel fell through to the canvas and
+   zoomed the board instead. The title screen takes the pointer while it is up;
+   there is nothing behind it to interact with. #winscreen deliberately does NOT
+   (the board stays live under the completion sheet). */
+#title.on{pointer-events:auto}
 #title{background:radial-gradient(120% 90% at 50% 0%,rgba(20,26,36,.85),rgba(6,8,11,.94))}
 #title .brand{display:flex;flex-direction:column;align-items:center;gap:var(--sp-3);text-align:center}
 #title .mark{width:58px;height:58px;color:var(--amber);filter:drop-shadow(0 4px 14px rgba(255,176,32,.28))}
@@ -722,7 +728,10 @@ const HEX_MULT  = { U2: 1.0, U3: 1.5, U4: 2.0, U5: 2.5, SP: 1.5 };
 // Game / puzzle content
 // ============================================================
 const GAME_TITLE = "GEAR WORKS";
-const WIN_SPIN_EPS = 1e-2;
+// "Is it turning at all". Small on purpose: a clock's hour hand runs at a fifth of
+// an rpm, and the coast integrator snaps a freewheeling part below COAST_STOP_EPS
+// to exactly zero, so a stopped part reads 0 rather than something tiny.
+const WIN_SPIN_EPS = 2e-3;
 // Seconds of simulation between solving a level and any UI appearing over it.
 const WIN_REVEAL_DELAY = 0.85;
 // Chrome geometry, mirrored from the stylesheet so the camera can work out which
@@ -768,7 +777,7 @@ const LEVELS = [
   { name: "First Mesh",
     hint: "Drag the gear between the two so all three teeth-sets touch.",
     inventory: ["U2"],
-    drives: [{ pos: [-2, 0], rpm: 120, type: "U2" }],
+    drives: [{ pos: [-2, 0], rpm: 36, type: "U2" }],
     driven: [{ pos: [2, 0], type: "U2" }],
     solution: [{ type: "U2", pos: [0, 0] }],
     naive_solves: true },
@@ -776,7 +785,7 @@ const LEVELS = [
   { name: "Straight Run",
     hint: "One gear cannot bridge this. Three in a row can.",
     inventory: ["U2", "U2", "U2"],
-    drives: [{ pos: [-4, 0], rpm: 120, type: "U2" }],
+    drives: [{ pos: [-4, 0], rpm: 36, type: "U2" }],
     driven: [{ pos: [4, 0], type: "U2" }],
     solution: [{ type: "U2", pos: [-2, 0] }, { type: "U2", pos: [0, 0] },
                { type: "U2", pos: [2, 0] }],
@@ -785,7 +794,7 @@ const LEVELS = [
   { name: "Turn It Around",
     hint: "Every mesh reverses the spin. The target must turn the motor's way — count the meshes, not the gears.",
     inventory: ["U2", "U2", "U2"],
-    drives: [{ pos: [-4, 0], rpm: 120, type: "U2" }],
+    drives: [{ pos: [-4, 0], rpm: 36, type: "U2" }],
     driven: [{ pos: [2, 0], type: "U2", spin: 1 }],
     solution: [{ type: "U2", pos: [-3, 1.7320508] }, { type: "U2", pos: [-1, 1.7320508] },
                { type: "U2", pos: [1, 1.7320508] }] },
@@ -793,7 +802,7 @@ const LEVELS = [
   { name: "Split the Power",
     hint: "One gear can drive two. Find the hub, then branch.",
     inventory: ["U2", "U2", "U2"],
-    drives: [{ pos: [-3, 0], rpm: 120, type: "U2" }],
+    drives: [{ pos: [-3, 0], rpm: 36, type: "U2" }],
     driven: [{ pos: [1, 2.6], type: "U2" }, { pos: [1, -2.6], type: "U2" }],
     solution: [{ type: "U2", pos: [-1, 0] },
                { type: "U2", pos: [-0.90723, 1.99784] },
@@ -802,7 +811,7 @@ const LEVELS = [
   { name: "Gearing Up",
     hint: "A big wheel driving a small one buys speed with torque. Five turns out for every one in.",
     inventory: ["U2", "U2"],
-    drives: [{ pos: [-4, 0], rpm: 48, type: "U5", id: "motor" }],
+    drives: [{ pos: [-4, 0], rpm: 16, type: "U5", id: "motor" }],
     driven: [{ pos: [3, 0], type: "U1", ratio: { of: "motor", value: -5 } }],
     solution: [{ type: "U2", pos: [-0.5, 0] }, { type: "U2", pos: [1.5, 0] }],
     naive_solves: true },
@@ -810,7 +819,7 @@ const LEVELS = [
   { name: "Gearing Down",
     hint: "The same trade, backwards: one turn out for every five in — and read what happened to the torque.",
     inventory: ["U2", "U2"],
-    drives: [{ pos: [-3, 0], rpm: 240, type: "U1", id: "motor" }],
+    drives: [{ pos: [-3, 0], rpm: 75, type: "U1", id: "motor" }],
     driven: [{ pos: [4, 0], type: "U5", ratio: { of: "motor", value: -0.2 } }],
     solution: [{ type: "U2", pos: [-1.5, 0] }, { type: "U2", pos: [0.5, 0] }],
     naive_solves: true },
@@ -818,7 +827,7 @@ const LEVELS = [
   { name: "Nothing In Between",
     hint: "Both wheels are the same size, so both must run at the same speed — same rate AND same direction.",
     inventory: ["U2", "U2", "U2", "U2"],
-    drives: [{ pos: [-4, 0], rpm: 120, type: "U2" }],
+    drives: [{ pos: [-4, 0], rpm: 36, type: "U2" }],
     driven: [{ pos: [-4, -4], type: "U2", id: "a" },
              { pos: [2, 0], type: "U2", ratio: { of: "a", value: 1 } }],
     solution: [{ type: "U2", pos: [-4, -2] },
@@ -828,7 +837,7 @@ const LEVELS = [
   { name: "Double Duty",
     hint: "Two motors, two targets, four gears. Split them.",
     inventory: ["U2", "U2", "U2", "U2"],
-    drives: [{ pos: [-5, 3], rpm: 120, type: "U2" }, { pos: [-5, -3], rpm: 90, type: "U3" }],
+    drives: [{ pos: [-5, 3], rpm: 36, type: "U2" }, { pos: [-5, -3], rpm: 27, type: "U3" }],
     driven: [{ pos: [1, 3], type: "U2" }, { pos: [1, -3], type: "U1" }],
     solution: [{ type: "U2", pos: [-3, 3] }, { type: "U2", pos: [-1, 3] },
                { type: "U2", pos: [-2.5, -3] }, { type: "U2", pos: [-0.5, -3] }] },
@@ -836,21 +845,21 @@ const LEVELS = [
   { name: "Shared Shaft",
     hint: "Drop a gear on another gear's CENTRE and they share a shaft. One turn out for every six in.",
     inventory: ["U4", "U1"],
-    drives: [{ pos: [-3.5, 0], rpm: 120, type: "U2", id: "motor" }],
+    drives: [{ pos: [-3.5, 0], rpm: 36, type: "U2", id: "motor" }],
     driven: [{ pos: [1.5, 0], type: "U3", ratio: { of: "motor", value: 1 / 6 } }],
     solution: [{ type: "U4", pos: [-0.5, 0] }, { type: "U1", pos: [-0.5, 0], stack: 0 }] },
 
   { name: "Overdrive",
     hint: "A shaft runs both ways. Big into small, twice over: eight turns out for every one in.",
     inventory: ["U1", "U2"],
-    drives: [{ pos: [-3, 0], rpm: 30, type: "U4", id: "motor" }],
+    drives: [{ pos: [-3, 0], rpm: 10, type: "U4", id: "motor" }],
     driven: [{ pos: [1, 0], type: "U1", ratio: { of: "motor", value: 8 } }],
     solution: [{ type: "U1", pos: [-0.5, 0] }, { type: "U2", pos: [-0.5, 0], stack: 0 }] },
 
   { name: "Two Stages",
     hint: "Stack a reduction on a reduction. Nothing but a shared shaft can multiply like this.",
     inventory: ["U5", "U1", "U4", "U1"],
-    drives: [{ pos: [-4.5, 0], rpm: 180, type: "U2", id: "motor" }],
+    drives: [{ pos: [-4.5, 0], rpm: 36, type: "U2", id: "motor" }],
     driven: [{ pos: [3.5, 0], type: "U3", ratio: { of: "motor", value: -1 / 30 } }],
     solution: [{ type: "U5", pos: [-1, 0] }, { type: "U1", pos: [-1, 0], stack: 0 },
                { type: "U4", pos: [1.5, 0] }, { type: "U1", pos: [1.5, 0], stack: 2 }] },
@@ -858,41 +867,41 @@ const LEVELS = [
   { name: "One In Sixty",
     hint: "Three stages, sixty to one. The first pinion rides the motor's own shaft.",
     inventory: ["U1", "U4", "U1", "U3", "U1"],
-    drives: [{ pos: [-3.75, 0], rpm: 60, type: "U2", id: "in" }],
+    drives: [{ pos: [-3.75, 0], rpm: 36, type: "U2", id: "in" }],
     driven: [{ pos: [3.75, 0], type: "U5", ratio: { of: "in", value: -1 / 60 } }],
     solution: [{ type: "U1", pos: [-3.75, 0], stack: "in" },
                { type: "U4", pos: [-1.25, 0] }, { type: "U1", pos: [-1.25, 0], stack: 1 },
                { type: "U3", pos: [0.75, 0] }, { type: "U1", pos: [0.75, 0], stack: 3 }] },
 
   { name: "Wind the Barrel",
-    hint: "A mainspring is a store, not a motor. Drive it and it fills — three turns.",
+    hint: "A mainspring is a store, not a motor. Drive it and it fills — one full turn.",
     inventory: ["U2", "U2"],
-    drives: [{ pos: [-3.5, 0], rpm: 170, type: "U2" }],
-    driven: [{ pos: [3, 0], type: "SP", wind_turns: 3 }],
+    drives: [{ pos: [-3.5, 0], rpm: 60, type: "U2" }],
+    driven: [{ pos: [3, 0], type: "SP", wind_turns: 1 }],
     solution: [{ type: "U2", pos: [-1.5, 0] }, { type: "U2", pos: [0.5, 0] }],
     naive_solves: true },
 
   { name: "Two Barrels",
-    hint: "One motor, two mainsprings. Branch the train and fill them both.",
+    hint: "One motor, two mainsprings. Branch the train and put a turn into each.",
     inventory: ["U2", "U2", "U2"],
-    drives: [{ pos: [-6, 0], rpm: 140, type: "U2" }],
-    driven: [{ pos: [-2, 2.5], type: "SP", wind_turns: 2 },
-             { pos: [2.5, 0], type: "SP", wind_turns: 2 }],
+    drives: [{ pos: [-6, 0], rpm: 60, type: "U2" }],
+    driven: [{ pos: [-2, 2.5], type: "SP", wind_turns: 1 },
+             { pos: [2.5, 0], type: "SP", wind_turns: 1 }],
     solution: [{ type: "U2", pos: [-4, 0] }, { type: "U2", pos: [-2, 0] },
                { type: "U2", pos: [0, 0] }] },
 
   { name: "First Hand",
-    hint: "A wheel with a pointer on a dial is a hand. Bring this one down to about ten turns a minute.",
+    hint: "A wheel with a pointer on a dial is a hand. Bring this one down to about nine turns a minute.",
     inventory: ["U3", "U1"],
-    drives: [{ pos: [-5, 0], rpm: -45, type: "U2" }],
+    drives: [{ pos: [-5, 0], rpm: -40, type: "U2" }],
     driven: [{ pos: [-0.5, 0], type: "U3", hand: "minute", dial: "MINUTES",
-               min_rpm: 8, max_rpm: 12 }],
+               min_rpm: 7, max_rpm: 10 }],
     solution: [{ type: "U3", pos: [-2.5, 0] }, { type: "U1", pos: [-2.5, 0], stack: 0 }] },
 
   { name: "The Going Train",
     hint: "Sub-assembly one: bring the barrel down to a tenth of its speed.",
     inventory: ["U2", "U4", "U1"],
-    drives: [{ pos: [-6, 0], rpm: 20, type: "U2", id: "barrel" }],
+    drives: [{ pos: [-6, 0], rpm: 30, type: "U2", id: "barrel" }],
     driven: [{ pos: [2, 0], type: "U5", ratio: { of: "barrel", value: -0.1 } }],
     solution: [{ type: "U2", pos: [-4, 0] }, { type: "U4", pos: [-1, 0] },
                { type: "U1", pos: [-1, 0], stack: 1 }] },
@@ -900,7 +909,7 @@ const LEVELS = [
   { name: "Twelve To One",
     hint: "The motion work: a pinion into a four, then a pinion into a three. Exactly twelve to one.",
     inventory: ["U1", "U4", "U1"],
-    drives: [{ pos: [-2.25, 0], rpm: 36, type: "U3", id: "in" }],
+    drives: [{ pos: [-2.25, 0], rpm: 26, type: "U3", id: "in" }],
     driven: [{ pos: [2.25, 0], type: "U3", ratio: { of: "in", value: 1 / 12 } }],
     solution: [{ type: "U1", pos: [-2.25, 0], stack: "in" },
                { type: "U4", pos: [0.25, 0] }, { type: "U1", pos: [0.25, 0], stack: 1 }] },
@@ -908,7 +917,7 @@ const LEVELS = [
   { name: "Barrel To Hand",
     hint: "Sub-assembly three: fifteen barrel turns, one sweep of the minute hand.",
     inventory: ["U1", "U5", "U1"],
-    drives: [{ pos: [-3.4, -0.6], rpm: -60, type: "U2", id: "barrel" }],
+    drives: [{ pos: [-3.4, -0.6], rpm: -34, type: "U2", id: "barrel" }],
     driven: [{ pos: [1.232, -0.419], type: "U3", hand: "minute", dial: "MINUTES",
                ratio: { of: "barrel", value: 1 / 15 } }],
     solution: [{ type: "U1", pos: [-3.4, -0.6], stack: "barrel" },
@@ -918,7 +927,7 @@ const LEVELS = [
   { name: "The Dial Train",
     hint: "Sub-assembly two: the hour hand turns once for every twelve of the minute hand.",
     inventory: ["U1", "U4", "U1"],
-    drives: [{ pos: [-2.25, 0.5], rpm: -18, type: "U3", id: "minute",
+    drives: [{ pos: [-2.25, 0.5], rpm: -26, type: "U3", id: "minute",
                hand: "minute", dial: "MINUTES" }],
     driven: [{ pos: [2.25, 0.5], type: "U3", hand: "hour", dial: "HOURS",
                ratio: { of: "minute", value: 1 / 12 } }],
@@ -928,7 +937,7 @@ const LEVELS = [
   { name: "Gear Works",
     hint: "The clock. Barrel to minute hand, fifteen to one; minute hand to hour hand, twelve to one.",
     inventory: ["U1", "U5", "U1", "U1", "U4", "U1"],
-    drives: [{ pos: [-5.266, 2.445], rpm: -60, type: "U2", id: "barrel" }],
+    drives: [{ pos: [-5.266, 2.445], rpm: -34, type: "U2", id: "barrel" }],
     driven: [{ pos: [-1.7, -1], type: "U3", id: "minute",
                hand: "minute", dial: "MINUTES", ratio: { of: "barrel", value: 1 / 15 } },
              { pos: [2.647, -0.871], type: "U3",
@@ -1832,8 +1841,9 @@ class Game {
     return items;
   }
   _win_items() {
-    if (this.level_idx + 1 < LEVELS.length) return [["Next Level", "next"], ["Main Menu", "menu"]];
-    return [["Main Menu", "menu"]];
+    const rest = [["Restart", "restart"], ["Main Menu", "menu"]];
+    if (this.level_idx + 1 < LEVELS.length) return [["Next Level", "next"]].concat(rest);
+    return rest;
   }
   enter_main_menu() { this.mode = "menu"; this._reset_camera(); this._clear_board(); }
   start_free_play() {
@@ -1999,7 +2009,10 @@ class Game {
   _RH(label) { return this.R2 * (HEX_MULT[label] || 1.0); }  // hex radius for a size label
 
   // ---- view camera (zoom + pan) ----
-  _reset_camera() { this.zoom = 1; this.camPanX = 0; this.camPanY = 0; this._cam_to = null; }
+  _reset_camera() {
+    this.zoom = 1; this.camPanX = 0; this.camPanY = 0;
+    this._cam_to = null; this._cam_pending = null;
+  }
   // Getting to watch your machine work is the reward, so a solved level frames
   // itself: the camera eases onto the mechanism, fitted into the screen area the
   // chrome and the completion sheet are NOT using.
@@ -2020,8 +2033,13 @@ class Game {
     const z = clampf(Math.min((b.x1 - b.x0) / Math.max(1, x1 - x0),
                               (b.y1 - b.y0) / Math.max(1, y1 - y0)) * 0.96, 0.5, 1.8);
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    this._cam_to = { zoom: z, panX: (b.x0 + b.x1) / 2 - z * cx,
-                     panY: (b.y0 + b.y1) / 2 - z * (this.H - cy) };
+    const to = { zoom: z, panX: (b.x0 + b.x1) / 2 - z * cx,
+                 panY: (b.y0 + b.y1) / 2 - z * (this.H - cy) };
+    // Held, not applied. Moving the camera the instant a level solves pulls the
+    // board out from under a hand that is still on it, which reads as the part
+    // having been dropped somewhere wrong. It waits for the reveal beat, and any
+    // touch before then cancels it for good.
+    this._cam_pending = to;
   }
   // The whole board — machine and staging row — fitted to the screen when the level
   // opens. Without it a two-gear level is a pair of specks in a mostly empty arena
@@ -2680,6 +2698,10 @@ class Game {
   update(dt) {
     this.anim += dt;                    // presentation clock: never gates physics
     if (this.mode === "menu") return;
+    if (this._cam_pending && this.win && !this.dragging &&
+        this._win_at !== null && (this.anim - this._win_at) > WIN_REVEAL_DELAY) {
+      this._cam_to = this._cam_pending; this._cam_pending = null;
+    }
     if (this._cam_to) {
       const k = 1 - Math.exp(-dt * 5.5);
       this.zoom += (this._cam_to.zoom - this.zoom) * k;
@@ -2696,7 +2718,11 @@ class Game {
     this._solve_linkages(dt);
     // A sliding rack changes which pinions it engages, so the topology is live.
     if (this.tile_list.some(t => t.is_rack() && Math.abs(t.omega) > 1e-6)) this._mark_dirty();
-    if (this.mode === "puzzle" && !this.win) this._check_win();
+    // Never judge a board that is mid-move. A freewheeling target coasts for
+    // seconds after its train is broken (COAST time constant ~1.1s), so a part
+    // merely HOVERING over its final position could latch a win off the leftover
+    // spin — and then drop wherever the player actually released it.
+    if (this.mode === "puzzle" && !this.win && !this.dragging) this._check_win();
   }
 
   // ---- linkages (kinematic crank-slider) ----
@@ -2881,11 +2907,14 @@ class Game {
     // A dial belongs to its wheel, so it is drawn immediately under that wheel
     // rather than behind the whole board — otherwise the going train's big wheels,
     // which a compound reduction necessarily overlaps it with, sit on the face.
+    // Role rings are painted UNDER the parts: they are context, and a bright ring
+    // drawn over the teeth competes with the thing it is pointing at.
+    if (this.mode === "puzzle") this._draw_roles(true);
     for (const t of _zBuf) { if (t.dial) this._draw_dial(t); t.draw(); }
     if (this.mode === "puzzle") {
       this._draw_hands();
       for (const t of _zBuf) if (t.dial) this._draw_dial_label(t);
-      this._draw_roles();
+      this._draw_roles(false);
     }
     this._draw_links();
     this._draw_flashes();
@@ -2997,19 +3026,28 @@ class Game {
     ctx.lineCap = "butt";
     ctx.restore();
   }
-  _draw_roles() {
+  // Two passes. `under` paints the rings, which are context and belong beneath the
+  // parts; the other paints the tags and guidance arrows, which are annotation and
+  // belong on top.
+  _draw_roles(under) {
     for (const t of this.tile_list) {
       if (t.role === "drive") {
-        G.dashRing(t.pos[0], t.pos[1], t.pitch_r() * 1.30, T.amber, 0.85, 2, 7, 6, -this.anim * 26);
-        G.ring(t.pos[0], t.pos[1], t.pitch_r() * 1.30, T.amber, 0.14, 6);
-        this._draw_tag(t.pos[0], t.pos[1] - t.pitch_r() * 1.30 - 13, "DRIVE", T.amber);
-        if (Math.abs(t.omega) > WIN_SPIN_EPS) {
-          this._draw_spin_arrow(t.pos[0], t.pos[1], t.pitch_r() * 1.46,
-                                Math.sign(t.omega), T.amber, 0.75);
+        const r = t.pitch_r() * 1.30;
+        if (under) {
+          // The dash offset is locked to the gear's OWN angle, so the ring turns
+          // with the part. It used to sweep at a fixed rate in the opposite
+          // direction, which fought the gear it was annotating and made the spin
+          // harder to read rather than easier.
+          G.dashRing(t.pos[0], t.pos[1], r, T.amber, 0.45, 1.5, 7, 6, -t.angle * r);
+        } else {
+          this._draw_tag(t.pos[0], t.pos[1] - r - 13, "DRIVE", T.amber);
+          if (Math.abs(t.omega) > WIN_SPIN_EPS) {
+            this._draw_spin_arrow(t.pos[0], t.pos[1], r * 1.12, Math.sign(t.omega), T.amber, 0.6);
+          }
         }
       } else if (t.role === "driven") {
         const ok = this.target_ok(t);
-        if (ok !== !!t._live) {
+        if (!under && ok !== !!t._live) {
           t._live = ok;
           if (ok) this.flash(t.pos[0], t.pos[1], t.pitch_r() * 2.4, T.green);
         }
@@ -3017,37 +3055,38 @@ class Game {
         // Role rings clear the dial rather than being drawn across it: a dial is
         // already a ring, and two concentric rings read as neither.
         const rr = t.dial ? this._dial_r(t) + 2.5 : t.pitch_r() * 1.30;
-        if (ok) {
-          G.ring(t.pos[0], t.pos[1], rr, col, t.dial ? 0.7 : 0.9, 2);
-          if (!t.dial) G.ring(t.pos[0], t.pos[1], rr, col, 0.16, 7);
-        } else {
-          G.dashRing(t.pos[0], t.pos[1], rr, col, 0.55, 2, 4, 7, 0);
+        const s = t.spec || {};
+        if (under) {
+          if (ok) {
+            G.ring(t.pos[0], t.pos[1], rr, col, t.dial ? 0.55 : 0.7, 2);
+            if (!t.dial) G.ring(t.pos[0], t.pos[1], rr, col, 0.10, 6);
+          } else {
+            G.dashRing(t.pos[0], t.pos[1], rr, col, 0.34, 1.5, 4, 7, -t.angle * rr);
+          }
+          if (s.wind_turns !== undefined) {
+            const f = clampf(Math.abs(t.wind || 0) / (s.wind_turns * TAU), 0, 1);
+            G.ring(t.pos[0], t.pos[1], rr + 6, T.cyanDim, 0.5, 3);
+            const ctx = G.ctx;
+            ctx.beginPath();
+            ctx.arc(t.pos[0], G.fy(t.pos[1]), rr + 6,
+                    -Math.PI / 2, -Math.PI / 2 + f * TAU);
+            ctx.strokeStyle = ca(ok ? T.green : T.cyan, 0.95); ctx.lineWidth = 3;
+            ctx.lineCap = "round"; ctx.stroke(); ctx.lineCap = "butt";
+          }
+          continue;
         }
         // The goal, on the part it applies to — a level with three different
-        // targets should not need the player to look anywhere else. A dial says it
-        // in its own caption instead, so it does not get a second copy.
-        // On a dial the name is already engraved above it, so the tag underneath
-        // carries the short form — two subdials 4u apart cannot both wear a
-        // sentence at 390px.
+        // targets should not need the player to look anywhere else. On a dial the
+        // name is already engraved above it, so the tag underneath carries the
+        // short form: two subdials 4u apart cannot both wear a sentence at 390px.
         this._draw_tag(t.pos[0], t.pos[1] - rr - 13,
-                       (ok ? "✓ " : "") + this.target_goal_text(t, !!t.dial), col);
-        const s = t.spec || {};
+                       (ok ? "\u2713 " : "") + this.target_goal_text(t, !!t.dial), col);
         const wantSpin = s.spin !== undefined ? Math.sign(s.spin)
           : (s.ratio ? Math.sign(s.ratio.value) * Math.sign((this._anchor(s.ratio.of) || {}).omega || 1) : 0);
         // The arrow is guidance. Once the goal is met it has nothing left to say,
         // and on a finished clock four of them are just noise over the mechanism.
         if (wantSpin && !ok) {
           this._draw_spin_arrow(t.pos[0], t.pos[1], rr + t.pitch_r() * 0.16, wantSpin, col, 0.7);
-        }
-        if (s.wind_turns !== undefined) {
-          const f = clampf(Math.abs(t.wind || 0) / (s.wind_turns * TAU), 0, 1);
-          G.ring(t.pos[0], t.pos[1], rr + 6, T.cyanDim, 0.5, 3);
-          const ctx = G.ctx;
-          ctx.beginPath();
-          ctx.arc(t.pos[0], G.fy(t.pos[1]), rr + 6,
-                  -Math.PI / 2, -Math.PI / 2 + f * TAU);
-          ctx.strokeStyle = ca(ok ? T.green : T.cyan, 0.95); ctx.lineWidth = 3;
-          ctx.lineCap = "round"; ctx.stroke(); ctx.lineCap = "butt";
         }
       }
     }
@@ -3056,8 +3095,8 @@ class Game {
     const d = this.selected_driver;
     if (!d || this.tile_list.indexOf(d) < 0) return;
     const r = d.pitch_r() * 1.22;
-    G.ring(d.pos[0], d.pos[1], r, T.amber, 0.13, 8);
-    G.dashRing(d.pos[0], d.pos[1], r, T.amber, 0.95, 2, 10, 7, -this.anim * 34);
+    G.ring(d.pos[0], d.pos[1], r, T.amber, 0.10, 7);
+    G.dashRing(d.pos[0], d.pos[1], r, T.amber, 0.6, 1.5, 10, 7, -d.angle * r);
   }
   // Floating rpm/torque readouts: one per gear, lifted ABOVE the gear so it never
   // covers the body, with a thin stem back to it. Pills are pushed further up
@@ -3101,8 +3140,13 @@ class Game {
     for (const t of this.tile_list) {
       if (t.is_rack()) continue;                       // racks carry their own inline text
       const lines = t.readout_lines(); if (!lines) continue;
-      const bw = Math.max(G.measure(lines[0], fontV), G.measure(lines[1], fontT)) + 18 * rs;
-      const bh = 32 * rs;
+      // Quantised on purpose. The pill's width used to track its text, so a
+      // settling train — where "119 rpm" becomes "120 rpm" and the torque drifts
+      // every frame — kept changing the box size, which changed the collision
+      // solve, which made pills jump around a board nobody was touching.
+      const raw = Math.max(G.measure(lines[0], fontV), G.measure(lines[1], fontT)) + 18 * rs;
+      const bw = Math.ceil(raw / (14 * rs)) * (14 * rs);
+      const bh = (lines[1] ? 32 : 21) * rs;
       // escape vector: away from crowded neighbours, biased upward
       let ex = 0, ey = 0;
       for (const o of this.tile_list) {
@@ -3126,6 +3170,10 @@ class Game {
       items.push({ t, ex, ey, bx: ex, by: ey, bw, bh, lines, push: 0,
                    ax: t.pos[0], ay: t.pos[1], cx: 0, cy: 0, r0 });
     }
+    // With the box size quantised above, every input to the layout below is a
+    // function of part POSITIONS alone. That makes the whole solve frame-stable on
+    // a board nobody is touching, which is the property `npm test` checks.
+    //
     // Priority: selected motor, then motors, then bigger gears — the labels that
     // matter keep the short stem and the rest give way.
     items.sort((a, b) => {
@@ -3284,7 +3332,8 @@ class Game {
     else if (mid === "to_menu") this.enter_main_menu();
   }
   _handle_screen_button(bid) {
-    if (bid === "free") this.start_free_play();
+    if (bid === "restart") this.start_level(this.level_idx);
+    else if (bid === "free") this.start_free_play();
     else if (bid === "menu") this.enter_main_menu();
     else if (bid === "next") this.start_level(this.level_idx + 1);
     else if (bid.indexOf("lvl_") === 0) this.start_level(parseInt(bid.split("_")[1], 10));
@@ -3294,7 +3343,11 @@ class Game {
     this._dragUI0 = ui[0]; this._dragUI1 = ui[1];
     const world = this.screen_to_world(mx, my); // gears (camera)
     this.touch_start = world;
-    if (this.mode === "menu" || this.win) return;   // the chrome layer owns those screens
+    if (this.mode === "menu") return;              // the chrome layer owns that screen
+    // The board stays live after a win: the completion sheet is docked out of the
+    // way precisely so the player can keep moving parts, try a cheaper build, or
+    // just push the machine around and watch it.
+    if (this.win) { this._cam_to = null; this._cam_pending = null; }   // touch cancels the re-frame
     const chosen = this._pick_tile(world);
     if (!chosen || chosen.anchored) return;
     // Grabbing a stacked top gear pulls it off the shaft.
@@ -3807,7 +3860,7 @@ const CHROME = {
 };
 
 // Expose for headless testing
-if (typeof globalThis !== "undefined") globalThis.__GW = { Game, G, tri_to_screen, rpm_to_omega, omega_to_rpm, LEVELS,
+if (typeof globalThis !== "undefined") globalThis.__GW = { Game, G, tri_to_screen, rpm_to_omega, omega_to_rpm, LEVELS, readouts: _roPlaced,
                                                 LEVEL_BOX, SPRING_MAX_WIND, WIN_REVEAL_DELAY };
 
 // ============================================================
