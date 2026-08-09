@@ -24,6 +24,10 @@ Each pull request gets a sticky comment with its own link, re-pointed on every p
 a pull request closes, its directory is deleted from the site. Both live on a single
 `gh-pages` branch in separate directories, so a preview can never overwrite `main`.
 
+Until something has been published from `main`, the site root shows a small directory of
+the open pull request previews instead of 404ing. `main`'s own build replaces it the first
+time it deploys.
+
 **Nothing is published until `npm test` passes.** The workflow runs the suite first and
 only deploys behind a green run, so a preview link always points at a build whose levels
 still solve and whose physics fingerprint is intact. A failing suite leaves the previous

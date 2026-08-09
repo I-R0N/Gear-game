@@ -158,6 +158,35 @@ jobs:
 
             touch site/.nojekyll   # serve files verbatim, no Jekyll pass
 
+            # Until main has published, the site root is empty and would 404.
+            # Leave a directory of whatever previews exist so the root URL is
+            # never a dead end. Regenerated while it is still the placeholder
+            # (so a closed pull request drops off the list) and replaced
+            # outright the first time main deploys its own index.html.
+            if [ ! -f site/index.html ] || grep -q gw-preview-index site/index.html; then
+              {
+                echo '<!doctype html><html lang="en"><meta charset="utf-8"><!--gw-preview-index-->'
+                echo '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                echo '<title>Gear Works — previews</title><style>'
+                echo 'body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0B0E14;'
+                echo 'color:#EAF0FA;font:15px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif}'
+                echo 'main{padding:32px;width:min(30rem,100%)}h1{font-size:24px;margin:0 0 8px}'
+                echo 'p{color:#8B98B0;margin:0 0 24px}a{display:block;padding:12px 16px;margin-bottom:8px;'
+                echo 'color:#EAF0FA;text-decoration:none;background:#1A2130;border:1px solid #2A3446;'
+                echo 'border-radius:6px}a:hover{border-color:#43526E}</style><main><h1>Gear Works</h1>'
+                echo '<p>Nothing has been published from <code>main</code> yet. Open pull request previews:</p>'
+                found=0
+                for d in site/pr/*/; do
+                  [ -d "$d" ] || continue
+                  n=$(basename "$d")
+                  printf '<a href="pr/%s/">Pull request #%s</a>\n' "$n" "$n"
+                  found=1
+                done
+                if [ "$found" = 0 ]; then echo '<p>None open right now.</p>'; fi
+                echo '</main></html>'
+              } > site/index.html
+            fi
+
             cd site
             git add -A
             if git diff --cached --quiet; then
