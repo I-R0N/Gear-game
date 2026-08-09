@@ -738,6 +738,8 @@ const DOCK_H_PX = 76;            // the mobile dock, plus its inset
 // viewports every run and asserts every part of every level fits inside it, so a
 // level that only fits on desktop fails the suite rather than shipping.
 const LEVEL_BOX = { x: 10.6, top: 9.5, bottom: -10.0 };
+// Drop-to-stack capture, as a fraction of the pair's tangent distance.
+const STACK_CAPTURE = 0.42;
 const STAGE_GAP = 0.42;          // clear space between staged inventory parts
 
 // Level schema (free-position / pitch-snap world). All positions are in units of
@@ -865,7 +867,7 @@ const LEVELS = [
   { name: "Wind the Barrel",
     hint: "A mainspring is a store, not a motor. Drive it and it fills — three turns.",
     inventory: ["U2", "U2"],
-    drives: [{ pos: [-3.5, 0], rpm: 120, type: "U2" }],
+    drives: [{ pos: [-3.5, 0], rpm: 170, type: "U2" }],
     driven: [{ pos: [3, 0], type: "SP", wind_turns: 3 }],
     solution: [{ type: "U2", pos: [-1.5, 0] }, { type: "U2", pos: [0.5, 0] }],
     naive_solves: true },
@@ -873,7 +875,7 @@ const LEVELS = [
   { name: "Two Barrels",
     hint: "One motor, two mainsprings. Branch the train and fill them both.",
     inventory: ["U2", "U2", "U2"],
-    drives: [{ pos: [-6, 0], rpm: 90, type: "U2" }],
+    drives: [{ pos: [-6, 0], rpm: 140, type: "U2" }],
     driven: [{ pos: [-2, 2.5], type: "SP", wind_turns: 2 },
              { pos: [2.5, 0], type: "SP", wind_turns: 2 }],
     solution: [{ type: "U2", pos: [-4, 0] }, { type: "U2", pos: [-2, 0] },
@@ -1984,7 +1986,15 @@ class Game {
     this.tap_move_tol = this.step * TAP_MOVE_TOL_MULT;
     this.mesh_tol = this.step * 0.14;    // pitch circles this close to tangent => meshing
     this.snap_reach = this.step * 0.9;   // how near a gear must drop to snap onto another
-    this.pocket_tol = this.step * 0.30;  // how near a two-gear pocket a drop must be to use it
+    // How near a two-gear pocket a drop must be to use it. A gear that has to mesh
+    // two fixed neighbours has essentially one correct position, so being eager
+    // here is the difference between a branch level feeling precise and feeling
+    // fussy; the pocket is only ever considered when a real tangency to both
+    // exists, so eagerness cannot invent a placement.
+    // 0.52 step is where a six-planet rosette starts snapping its planets into each
+    // other's pockets instead of sitting at the angle they were dropped at, so this
+    // stays comfortably under it.
+    this.pocket_tol = this.step * 0.40;
   }
   _RH(label) { return this.R2 * (HEX_MULT[label] || 1.0); }  // hex radius for a size label
 
@@ -2259,8 +2269,12 @@ class Game {
     // nestling a gear between two, but it shouldn't hijack every drop — so only
     // take it when the drop really is at that pocket. Otherwise fall through to
     // single-gear tangency, which honours the drop angle exactly.
+    // The pocket must include the gear the drop is NEAREST to being tangent to.
+    // Without that, a drop with one obvious neighbour can be captured by a pocket
+    // formed from two further-off ones that happen to admit a double tangency —
+    // which silently rebuilds the train somewhere else.
     let pocket = null, pocketD = 1e18;
-    for (let i = 0; i < cand.length && i < 4; i++) {
+    for (let i = 0; i < 1 && i < cand.length; i++) {
       for (let j = i + 1; j < cand.length && j < 5; j++) {
         const a = cand[i].o, b = cand[j].o;
         if (a.partner === b) continue;
@@ -2407,8 +2421,14 @@ class Game {
     let best = null, bestd = 1e18;
     for (const o of this.tile_list) {
       if (o === t || o.partner || o.on_shaft_top || o.is_rack() || o.is_ring()) continue;
+      // The gesture this competes with is "mesh with that gear", which lands at
+      // the tangent distance rTop + rBase. So the capture radius is a fraction of
+      // THAT, not of the base alone: scaling it off the base made stacking a big
+      // gear onto a small one — which is exactly what a speed-increasing stage
+      // needs — a 10px target on desktop and 5px on a phone.
+      const cap = STACK_CAPTURE * (t.pitch_r() + o.pitch_r());
       const d = dist2(world, o.pos);
-      if (d < bestd && d <= (o.pitch_r() * 0.6) ** 2) { bestd = d; best = o; }
+      if (d < bestd && d <= cap * cap) { bestd = d; best = o; }
     }
     return best;
   }
