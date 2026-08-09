@@ -86,14 +86,31 @@ CSS custom properties on `:root` (for chrome) and the `T` object (for canvas).
 | Token | Hex | Part |
 | --- | --- | --- |
 | `--alloy-u1` | `#7C5FB4` | U1 triangle — anodised violet |
-| `--alloy-u2` | `#2E8B85` | U2 small hex — anodised teal |
-| `--alloy-u3` | `#B0783F` | U3 hex — anodised bronze |
-| `--alloy-u4` | `#AC4D63` | U4 hex — anodised crimson |
-| `--alloy-u5` | `#5062B4` | U5 hex — anodised indigo |
+| `--alloy-u2` | `#2E8B85` | U2 — anodised teal |
+| `--alloy-u3` | `#B0783F` | U3 — anodised bronze |
+| `--alloy-u4` | `#AC4D63` | U4 — anodised crimson |
+| `--alloy-u5` | `#5062B4` | U5 — anodised indigo |
 | `--alloy-sp` | `#3F8A57` | spring gear — anodised green |
 | `--alloy-rack` | `#5B6580` | rack bar — raw steel |
 | `--alloy-ring` | `#2F7F6E` | ring gear — anodised sea |
 | `--alloy-rod` | `#D2A24A` | linkage rod — brass |
+
+### Part silhouettes
+
+Gears are **cut blanks, not tiles**. The body is a disc out to the root circle with the
+teeth standing proud of it, exactly the way a cut gear looks, and six lightening holes are
+bored through the web — genuinely see-through, which is what lets a stacked gear read
+through the one on top of it. The U1 triangle keeps its plate: it is the one part the level
+content names by shape ("spin the little triangle gear"), so it stays a triangle.
+
+Two parts carry openings of their own, both punched with the same even-odd technique so
+the field shows through:
+
+- **Ring gear** — radial slots milled through the rim, count scaled to the rim/circumference
+  ratio. They turn with the ring and replaced the old registration marks, which they do a
+  better job of than a painted line ever did.
+- **Rack** — one slot down the longitudinal centreline, capped at both ends, inset from the
+  bar's ends so the body stays continuous.
 
 Every alloy gets a machined treatment derived from the base hex: `×1.34` top-left facet,
 `×0.62` bottom-right facet, a 12°-wide specular sweep at `+38%` lightness, and a

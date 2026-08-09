@@ -133,13 +133,21 @@ console.log("\ninteraction through the chrome layer");
 {
   const ip = await openPage(browser, { file: FILE, width: 1280, height: 800, dpr: 1 });
   await ip.addScriptTag({ content: preamble });
+  // `--file <pre-overhaul build>` is how the baseline gets re-anchored, and that
+  // build predates the chrome layer. Skip rather than fail: the point of that
+  // run is the physics fingerprint, not the DOM.
+  await ip.evaluate(() => { window.__GW.game.start_free_play(); window.__GW.step(2, 1 / 60); });
+  const hasChrome = await ip.evaluate(() => !!document.getElementById("rail"));
+  if (!hasChrome) {
+    console.log("  – skipped: this build has no chrome layer");
+    await ip.close();
+  } else {
   const toScreen = (w) => ip.evaluate((wp) => {
     const g = window.__GW.game;
     return [g.camPanX + g.zoom * wp[0], g.camPanY + g.zoom * (g.H - wp[1])];
   }, w);
 
   // 1. a DOM rail tile adds a part to the canvas world
-  await ip.evaluate(() => { window.__GW.game.start_free_play(); window.__GW.step(2, 1 / 60); });
   const before = await ip.evaluate(() => window.__GW.game.tile_list.length);
   await ip.click('#rail .tile[aria-label="Add U4"]');
   const after = await ip.evaluate(() => window.__GW.game.tile_list.length);
@@ -251,6 +259,7 @@ console.log("\ninteraction through the chrome layer");
     check("Next Level advances", nx.idx === 2 && nx.win === false, JSON.stringify(nx));
   }
   await ip.close();
+  }
 }
 
 // ------------------------------------------------------------------- baseline

@@ -11,7 +11,7 @@ export const preamble = `
       const g = this.g();
       const t = g._add_gear(type, pos, !!(opts && opts.driver));
       t.pos = pos.slice();
-      g._snap_gear(t, pos.slice());
+      if (!(opts && opts.noSnap)) g._snap_gear(t, pos.slice());
       t.z = Math.max(0, ...g.tile_list.map(x => x.z)) + 1;
       if (opts && opts.driver) { t.is_driver = true; g.selected_driver = t; }
       g._mark_dirty();
@@ -121,6 +121,50 @@ export const SCENES = {
       g._mark_dirty();
       g._ensure_rebuilt();
     },
+  },
+};
+
+SCENES.mechanism = {
+  label: "Rack + pinion, crank linkage and a wound spring",
+  frames: 42,
+  build: () => {
+    const S = window.__S, g = S.g();
+    g.start_free_play();
+    g._clear_board();
+    const cx = g.origin[0], cy = g.origin[1], s = g.step;
+
+    // --- geared rack: a driver pinion riding the underside of the bar ---
+    const pinion = S.put("U3", [cx - s * 2.2, cy + s * 1.2], { driver: true, noSnap: true });
+    const rackA = g._add_rack([cx - s * 0.3, pinion.pos[1] + rackGap(g, pinion)], 0);
+    rackA.home = rackA.pos.slice(); rackA.s = 0; rackA.sync_pos();
+
+    // --- a wound spring gear driven off the same pinion ---
+    // Below it, not beside it: level with the pinion it would be tangent to the
+    // same rack, and a pair of gears both driving one rack is over-constrained
+    // (the solver correctly seizes the train).
+    const sp = S.put("SP", [pinion.pos[0], pinion.pos[1] - S.tangent(pinion.pitch_r(), S.rp("SP"))],
+                     { noSnap: true });
+    sp.wind = 3 * Math.PI * 2;
+
+    // --- crank + rod driving a second, deliberately UNgeared rack ---
+    // Kept clear of the pinion train and far enough off the bar that it cannot
+    // mesh it: the linkage is a position constraint, not a gear pair.
+    const crank = S.put("U4", [cx + s * 2.6, cy - s * 1.6], { driver: true, noSnap: true });
+    const rackB = g._add_rack([crank.pos[0], crank.pos[1] - s * 2.6], 0);
+    rackB.home = rackB.pos.slice(); rackB.s = 0; rackB.sync_pos();
+
+    g._mark_dirty();
+    g._ensure_rebuilt();
+    g._make_link();
+
+    g.selected_driver = pinion;
+    g._mark_dirty();
+    g._ensure_rebuilt();
+
+    function rackGap(game, gear) {
+      const module = game.circular_pitch_px / Math.PI;
+      return Math.max(6, module * 3.0) + gear.pitch_r();
+    }
   },
 };
 
