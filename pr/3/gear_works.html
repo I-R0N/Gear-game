@@ -2306,35 +2306,76 @@ class Game {
   // them). Puzzle inventory staging still keeps its scattered pieces on-screen.
   is_pos_safe(x, y) { return this.mode !== "puzzle" || this._in_view(x, y); }
   _in_view(x, y) { const m = this.safe_margin; return x >= m && x <= this.W - m && y >= m && y <= this.H - m; }
+  // Which gears share a PLANE with a gear placed at `pos`?
+  //
+  // Two gears that mesh are, by construction, at the same height — that is what
+  // meshing means. So mesh is the relation that spreads a plane, and it spreads
+  // transitively: anything reachable from here through mesh edges alone lies in the
+  // same layer of the machine. A SHAFT is the only thing that changes height, which
+  // is why a shaft hop breaks the chain rather than continuing it.
+  //
+  // A gear in no train at all is on the bench, and the bench is a plane too — so two
+  // idle parts count as coplanar with each other, which is what stops a dropped spare
+  // from burying itself in another spare.
+  //
+  // The set is computed for a candidate POSITION rather than for the dragged tile,
+  // because the tile is out of the graph while it is in hand: whatever it would be
+  // tangent to at `pos` is what it would be coplanar with if released there.
+  _coplanar_at(pos, rp, ignore) {
+    const adj = new Map();
+    for (const [a, b] of this.mesh_edges) {
+      if (a === ignore || b === ignore) continue;
+      if (!adj.has(a)) adj.set(a, []);
+      if (!adj.has(b)) adj.set(b, []);
+      adj.get(a).push(b); adj.get(b).push(a);
+    }
+    const seen = new Set(), q = [];
+    for (const t of this.tile_list) {
+      if (t === ignore || (ignore && t === ignore.partner)) continue;
+      if (t.is_rack() || t.is_ring()) continue;
+      if (Math.abs(dist(pos, t.pos) - (rp + t.pitch_r())) <= this.mesh_tol) { seen.add(t); q.push(t); }
+    }
+    const meshesSomething = q.length > 0;
+    while (q.length) {
+      const c = q.pop();
+      for (const n of (adj.get(c) || [])) if (!seen.has(n)) { seen.add(n); q.push(n); }
+    }
+    return { set: seen, onBench: !meshesSomething };
+  }
   // Would a gear of pitch rp at pos collide with an existing gear? Two answers,
   // because seating and spawning want different ones.
   //
   //   "seat"  — where the player (or a level) is putting a gear ON PURPOSE.
-  //     A compound reduction genuinely overlaps in plan view: the pinion is
-  //     smaller than its wheel, so the next wheel always lands inside the previous
-  //     wheel's footprint, and when the pinion is a U1 the next wheel's centre can
-  //     sit well inside it. Real trains solve this by stacking axially, which is
-  //     exactly what a shared shaft is here. Refusing those placements makes every
-  //     compound train unbuildable, so seating only refuses a drop that lands
-  //     inside another gear's STACK-CAPTURE radius — and a drop there is a
-  //     stacking gesture, which `_stack_target` handles (0.6 * pitch_r) before
-  //     this is ever consulted. There is deliberately no gap between the two.
+  //     A compound reduction genuinely overlaps in plan view: the pinion is smaller
+  //     than its wheel, so the next wheel always lands inside the previous wheel's
+  //     footprint. Real trains solve this by stacking axially — the two wheels are at
+  //     different heights on adjacent arbors — which is exactly what a shared shaft is
+  //     here, and refusing those placements makes every compound train unbuildable.
+  //     So the test is not "do these overlap" but "do these overlap ON ONE PLANE":
+  //     coplanar gears must either mesh or stay clear of each other, and anything a
+  //     shaft has lifted out of the plane is free to pass over it.
   //
-  //   "spawn" — where the game is choosing a spot for the player, out of the
-  //     parts tray. Nothing is intended there yet, so it keeps full pitch-circle
-  //     clearance and a new part never lands on the pile.
+  //   "spawn" — where the game is choosing a spot for the player, out of the parts
+  //     tray. Nothing is intended there yet, so it keeps full pitch-circle clearance
+  //     from everything and a new part never lands on the pile.
   _overlaps(pos, rp, ignore, mode) {
     const spawn = mode === "spawn";
+    const plane = spawn ? null : this._coplanar_at(pos, rp, ignore);
     for (const t of this.tile_list) {
       if (t === ignore || (ignore && t === ignore.partner)) continue;
       if (t.is_rack() || t.is_ring()) continue; // bars and rings don't block a gear
-      if (t.partner) continue;   // shaft gears sit in their own plane — don't block nesting
       const d = dist(pos, t.pos);
-      const min = spawn ? rp + t.pitch_r() - this.mesh_tol*1.5 : t.pitch_r() * 0.55;
-      if (d < min) return true;
+      if (spawn) { if (d < rp + t.pitch_r() - this.mesh_tol*1.5) return true; continue; }
+      // A gear on a shaft has been lifted clear of the bench, so it only blocks
+      // something that is on ITS plane — reached without changing arbor.
+      const sameLayer = plane.set.has(t) || (plane.onBench && !t.partner && !this._in_train(t));
+      if (!sameLayer) continue;
+      // Coplanar: closer than a mesh is a collision. Exactly at a mesh is a mesh.
+      if (d < rp + t.pitch_r() - this.mesh_tol) return true;
     }
     return false;
   }
+  _in_train(t) { return this.mesh_edges.some(([a, b]) => a === t || b === t); }
   // Where a gear of pitch rp must sit to mesh a ring at `drop` (inner or outer
   // circle, whichever the drop is nearer). Returns [pos, err] or null.
   _ring_snap(ring, drop, rp) {
