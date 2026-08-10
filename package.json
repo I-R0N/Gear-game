@@ -7,7 +7,10 @@
     "shots": "node scripts/shots.mjs",
     "shots:before": "node scripts/shots.mjs --out shots/before --clean",
     "shots:after": "node scripts/shots.mjs --out shots/after --clean",
-    "audit": "node scripts/audit.mjs"
+    "audit": "node scripts/audit.mjs",
+    "curve": "node scripts/curve.mjs",
+    "shots:levels": "node scripts/shots.mjs --mode levels",
+    "play": "node scripts/play.mjs"
   },
   "repository": {
     "type": "git",

@@ -85,7 +85,7 @@ CSS custom properties on `:root` (for chrome) and the `T` object (for canvas).
 
 | Token | Hex | Part |
 | --- | --- | --- |
-| `--alloy-u1` | `#7C5FB4` | U1 triangle — anodised violet |
+| `--alloy-u1` | `#7C5FB4` | U1 — anodised violet |
 | `--alloy-u2` | `#2E8B85` | U2 — anodised teal |
 | `--alloy-u3` | `#B0783F` | U3 — anodised bronze |
 | `--alloy-u4` | `#AC4D63` | U4 — anodised crimson |
@@ -95,13 +95,36 @@ CSS custom properties on `:root` (for chrome) and the `T` object (for canvas).
 | `--alloy-ring` | `#2F7F6E` | ring gear — anodised sea |
 | `--alloy-rod` | `#D2A24A` | linkage rod — brass |
 
+### Alloy (role-coded — campaign anchors only)
+
+A level's motor and its targets are bolted to the board and are not yours to move, so
+they are cast in their own metal instead of borrowing the size palette from the loose
+stock in the tray. One look answers "can I pick this up", before any ring or label is
+read. The hue follows the language the rings and labels already use.
+
+| Token | Hex | Part |
+| --- | --- | --- |
+| `--alloy-drive` | `#8E6A16` | anchored motor — dark gold |
+| `--alloy-driven` | `#256F52` | anchored target — deep green |
+
+A spring keeps `--alloy-sp` in either role: its coil already runs green → amber → red to
+show how far it is wound, and a green plate under a green coil takes that reading away.
+`npm test` asserts, per level, that no anchor shares a base alloy with any loose part.
+
 ### Part silhouettes
 
 Gears are **cut blanks, not tiles**. The body is a disc out to the root circle with the
 teeth standing proud of it, exactly the way a cut gear looks, and six lightening holes are
 bored through the web — genuinely see-through, which is what lets a stacked gear read
-through the one on top of it. The U1 triangle keeps its plate: it is the one part the level
-content names by shape ("spin the little triangle gear"), so it stays a triangle.
+through the one on top of it. **Every** gear, including the U1: it used to carry a
+triangular plate 1.5× its pitch radius, a survivor of the hex-plate era and the only part
+still wearing a shape instead of a size. Nothing in the campaign names a part by shape, so
+there was nothing left for it to say.
+
+Gears cast no shadow. Each one used to trail a dark crescent under its lower edge, which
+is fine on one gear and a mess on twenty overlapping ones — a compound train stacked four
+of them into a smear that read as dirt rather than as depth. The bevel, the engraved root
+circle and the punched windows carry the relief instead.
 
 Two parts carry openings of their own, both punched with the same even-odd technique so
 the field shows through:
@@ -116,6 +139,37 @@ Every alloy gets a machined treatment derived from the base hex: `×1.34` top-le
 `×0.62` bottom-right facet, a 12°-wide specular sweep at `+38%` lightness, and a
 `rgba(0,0,0,.55)` engraved outline. That derivation lives in one place (`shadeHex`), so a
 new part only needs a base hex to inherit the material.
+
+### Planes, and what may overlap what
+
+The board is not flat, and the placement rule is the only thing that says so.
+
+**Gears that mesh are at the same height** — that is what meshing *means*. So a plane
+spreads along mesh edges, and it spreads transitively: everything reachable through mesh
+edges alone is one layer of the machine. A **shaft** is the only thing that changes
+height, so a shaft hop breaks the chain instead of continuing it. A gear in no train at
+all is on the bench, and the bench is a plane too, which is what stops a dropped spare
+burying itself in another spare.
+
+From which: **coplanar gears must either mesh or stay clear of each other.** Anything a
+shaft has lifted out of the plane may pass over anything below it.
+
+Both halves earn their keep. The strict half fixes a real defect — two gears meshing the
+same hub are siblings on one plane and could previously be dropped 1.9 pitch radii inside
+each other, which is a picture that lies about the machine. The permissive half is what
+lets the campaign exist at all: a compound reduction *always* overlaps in plan view
+(`CLOCK.md`, rule 2), and sixteen of the twenty levels contain at least one overlapping
+pair. Every one of those pairs is reachable only through a shaft. `npm test` asserts that
+level by level, in both directions.
+
+The check runs against a candidate *position*, not against the dragged tile, because the
+tile is out of the mesh graph while it is in hand: whatever it would be tangent to at that
+position is what it would be coplanar with if released there. That also makes the rule
+independent of the order parts are placed in — which matters, because a level's compound
+wheel is seated before the pinion that will lift it out of the plane exists.
+
+**Not yet built:** the planes are enforced but not *drawn*. A shaft-borne gear passing over
+another still reads as clipping rather than as depth. See the parking lot in `LEVELS.md`.
 
 ### Type
 
@@ -172,9 +226,10 @@ carries `-0.01em` and weight 700; body is 400. Line-height `1.35` body, `1.08` d
 - The one deliberate per-frame allocation is the readout layout list — one small object
   per visible pill, rebuilt because the escape-vector solve is genuinely per-frame.
 
-Measured (`npm run audit`, headless Chromium, dpr 2, densest scene, 13 parts):
-**median 0.6-0.7 ms/frame, p95 1.0-1.3 ms** against a 16.7 ms budget, at both
-1280x800 and 390x844. This container also injects multi-second renderer stalls every
+Measured (`npm run audit`, headless Chromium, dpr 2): the densest free-play scene at 13
+parts runs **median 1.0 ms/frame, p95 1.5-1.7 ms**, and the solved clock — two dial plates,
+two hands, four stacked pinions and a camera at 1.8x — runs **median 0.7-0.8 ms, p95
+1.1 ms**, both against a 16.7 ms budget and at both 1280x800 and 390x844. This container also injects multi-second renderer stalls every
 few seconds that reproduce with the game's draw calls stubbed out, so p99 is reported
 but not gated — it measures the sandbox, not the page.
 
@@ -193,6 +248,20 @@ covered by tests:
 - **A drag that crosses the chrome must keep tracking.** `mousemove` is bound to
   `window`, not the canvas, so dragging a part over the tool rail on its way to the
   scrap tray does not lose the part mid-flight.
+- **A `pointer-events:none` container cannot scroll, however overflowing it is.** The
+  same rule that lets drags reach the board through the chrome also swallows the scroll
+  gesture, so a container that overflows silently traps its own content: the title
+  screen's twenty-one level rows below the fold, and the mobile dock's parts beyond the
+  right edge. Both are fixed by opting the *scrolling container* back into hit-testing
+  (`#title.on`, and the dock in the mobile media query) rather than only its buttons —
+  and the dock additionally needs `touch-action:pan-x` so a horizontal swipe scrolls it
+  instead of being claimed as a board pan. Both are asserted in `npm test` by measuring
+  `scrollWidth`/`clientWidth` and the computed `pointer-events` of the container itself.
+- **A scrollable thing has to look scrollable, and then stop.** The dock fades its right
+  edge so a thumb knows there is more; the fade is driven off `scrollWidth - clientWidth -
+  scrollLeft`, so it goes away at the end of the travel instead of smearing the last
+  button, and never appears at all when the dock fits. It is re-decided on `scroll` and on
+  every rail rebuild, because a rebuilt rail is a different width and fires no scroll event.
 
 ---
 
@@ -200,9 +269,10 @@ covered by tests:
 
 | command | what it proves |
 | --- | --- |
-| `npm test` | all 5 levels still solve; mesh/ratio/shaft/rack invariants hold; real mouse events still tap-to-drive, drag, stack, scrap and win; and a **physics fingerprint captured from the pre-overhaul build reproduces exactly** |
-| `npm run audit` | frame cost vs a 16.7 ms budget, WCAG AA contrast on every rendered text node across 8 screen/viewport combinations, and 44 px minimum touch targets |
-| `npm run shots` | 6 scenes x 2 viewports into `shots/` |
+| `npm test` | all 20 campaign levels solve from their own solution specs, with exactly the meshes those specs imply and no degenerate way to win them; mesh/ratio/shaft/rack invariants hold; real mouse events still tap-to-drive, drag, stack, scrap and win; the completion sheet leaves the built mechanism visible and its actions are actually visible; and a **physics fingerprint captured from the pre-overhaul build reproduces exactly** for the free-play, planetary and mechanism scenes |
+| `npm run audit` | frame cost vs a 16.7 ms budget for both the densest free-play scene and the solved clock, WCAG AA contrast on every rendered text node across 8 screen/viewport combinations, and 44 px minimum touch targets |
+| `npm run curve` | the difficulty curve as a measurement rather than an opinion |
+| `npm run shots` | 7 scenes x 2 viewports into `shots/`; `shots:levels` adds all 20 levels, start and solved, at both viewports |
 
 `tests/baseline.json` is the presentation-only guard. It was generated by running the
 suite against commit `ff07b59` (tokens only, original rendering) and is compared against

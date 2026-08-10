@@ -2,6 +2,7 @@
 // frame cost, WCAG text contrast, and touch-target size.  `npm run audit`
 import { launch, openPage } from "./browser.mjs";
 import { SCENES, preamble } from "./scenes.mjs";
+import { levelKit } from "./levels.mjs";
 
 const FRAME_BUDGET = 16.7;
 let fails = 0;
@@ -35,13 +36,40 @@ for (const [w, h] of [[1280, 800], [390, 844]]) {
   await page.close();
 }
 
+// The campaign's densest board is the clock, which the free-play scene does not
+// stand in for: it adds two dial plates, two hands, four stacked pinions and a
+// camera at 1.8x. Budget it separately or the finale is the one screen nobody
+// measured.
+console.log("frame cost — solved level 20, dpr 2");
+for (const [w, h] of [[1280, 800], [390, 844]]) {
+  const page = await openPage(browser, { file: "gear_works.html", width: w, height: h, dpr: 2 });
+  await page.addScriptTag({ content: levelKit });
+  const r = await page.evaluate(() => {
+    const g = window.__GW.game;
+    window.__L.solve(window.__GW.LEVELS.length - 1, { frames: 1 });
+    for (let i = 0; i < 90; i++) { g.update(1 / 60); window.__GW.render(); }   // warm up + reveal
+    const t = [];
+    for (let i = 0; i < 300; i++) {
+      const a = performance.now(); g.update(1 / 60); window.__GW.render();
+      t.push(performance.now() - a);
+    }
+    t.sort((x, y) => x - y);
+    return { median: +t[150].toFixed(2), p95: +t[285].toFixed(2), parts: g.tile_list.length, zoom: +g.zoom.toFixed(2) };
+  });
+  const ok = r.p95 < FRAME_BUDGET;
+  if (!ok) fails++;
+  console.log(`  ${ok ? "✓" : "✗"} ${w}x${h}  ${r.parts} parts @ ${r.zoom}x  median ${r.median}ms  p95 ${r.p95}ms`);
+  await page.close();
+}
+
 // ------------------------------------------------------- contrast + targets
 for (const [w, h, name] of [[1280, 800, "desktop"], [390, 844, "mobile"]]) {
   for (const scene of ["menu", "free", "puzzle", "win"]) {
     const page = await openPage(browser, { file: "gear_works.html", width: w, height: h, dpr: 2 });
     await page.addScriptTag({ content: preamble });
     await page.evaluate(SCENES[scene].build);
-    await page.evaluate((f) => window.__GW.step(f, 1 / 60), SCENES[scene].frames);
+    // `win` has to run past the 0.85s reveal beat or there is no sheet to measure
+    await page.evaluate((f) => window.__GW.step(f, 1 / 60), Math.max(SCENES[scene].frames, scene === "win" ? 180 : 0));
     await page.waitForTimeout(450);
     const a = await page.evaluate(() => {
       const lum = (c) => {
