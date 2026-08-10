@@ -205,6 +205,11 @@ Each of these is an assertion in `npm test`, run against all twenty levels every
   6 and 13, which declare `naive_solves` — there the obvious chain *is* the answer, and
   the suite asserts it works, because a tutorial that punishes the obvious move is a bad
   tutorial.
+* **Nothing overlaps on its own plane.** Gears that mesh are at the same height, so a
+  plane spreads along mesh edges and stops at a shaft. Two gears on one plane must either
+  mesh or stay clear. The suite checks both directions per level: no coplanar pair
+  overlaps, and the pairs that *do* overlap — sixteen levels have at least one — are
+  reachable only through a shaft, which is the compound geometry the campaign is made of.
 * **No winning off a coast.** The level is solved, then the part nearest the motor is
   lifted clean off the board, and every frame of the resulting spin-down is checked: no
   target may report itself satisfied on any of them. See below — this was real on sixteen
@@ -312,3 +317,19 @@ Two goals needed more than the driven test:
   branching from level 4 and resolves in about three seconds.
 * **A third consolidation level.** Levels 8 and 12 do that job. A third would be filler,
   and at twenty slots filler is a failing grade.
+
+## Parking lot
+
+Wanted, understood, not built. Each of these has a reason it is not urgent, so that a
+future pass can pick it up without re-deriving the argument.
+
+* **Draw the planes.** The placement rule now knows which gears are at which height —
+  mesh spreads a plane, a shaft changes it — but the renderer does not. A shaft-borne
+  wheel passing over the one below it still reads as clipping rather than as depth, which
+  is the reason the overlap looked wrong in the first place; the rule stops the cases that
+  are genuinely nonsense, but the legitimate compound overlaps still have to be *taken on
+  trust*. The fix is a visual one: give a raised gear an edge treatment that says it is
+  above the board — a rim light, a contact occlusion under it, or a slight desaturation of
+  whatever it covers. Deliberately not a global drop shadow: that is what was just removed,
+  because twenty of them stacked into a smear. Worth doing when the clock levels next get a
+  visual pass; the plane model it needs is already in place and tested.

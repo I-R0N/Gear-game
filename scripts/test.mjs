@@ -157,6 +157,12 @@ for (let i = 0; i < LEVELS.length; i++) {
   const clash = paint.anchors.filter(([, c]) => paint.loose.includes(c));
   check(`${label} paints its anchors in role metal, not stock metal`,
     clash.length === 0, JSON.stringify({ clash, loose: paint.loose }));
+  // Overlap is legal exactly when a shaft has lifted one of the pair out of the
+  // plane. Both halves matter: a coplanar overlap is a picture that lies, and the
+  // shaft-borne ones are the compound stages the campaign is built out of.
+  const planes = await page.evaluate((i) => window.__L.coplanarOverlaps(i), i);
+  check(`${label} has no two gears overlapping on one plane`,
+    planes.bad.length === 0, planes.bad.join("; "));
   // A player found this one: spin a target up, cut the gear feeding it, and cash the
   // win while it is still coasting. Cut the train and watch every frame of the
   // spin-down — no target may report satisfied on any of them.
@@ -646,6 +652,35 @@ console.log("\ninteraction through the chrome layer");
   }, st.uid);
   check("a sloppy drop stacks a big gear onto a small one", stacked.partner && stacked.win,
     JSON.stringify(stacked));
+
+  // 7b. the reported case: two gears meshing the SAME gear are siblings on one plane,
+  // so they may not overlap each other. Aim a U3 squarely at the U2 it would bury
+  // itself in and check the snapper rolls it round to a seat that is clear.
+  const sib = await ip.evaluate(() => {
+    const g = window.__GW.game;
+    g.start_free_play();
+    g.tile_list.length = 0;
+    const U = g.Rp2, O = [g.W * 0.5, g.H * 0.5], ang = 0.5;
+    g._add_tri([O[0] - 1.5 * U, O[1]], true);                                   // motor
+    const A = g._add_hex([O[0], O[1]], g.R2, false, "U2");                      // the hub
+    const B = g._add_hex([O[0] + 2 * U * Math.cos(ang), O[1] + 2 * U * Math.sin(ang)],
+                         g.R2, false, "U2");                                    // sibling one
+    g._mark_dirty();
+    for (let f = 0; f < 60; f++) g.update(1 / 60);
+    // sibling two, dropped exactly on top of sibling one
+    const C = g._add_hex([O[0] + 40 * U, O[1]], g.R3, false, "U3");
+    g._snap_gear(C, [O[0] + 2.5 * U * Math.cos(ang), O[1] + 2.5 * U * Math.sin(ang)]);
+    g._mark_dirty();
+    for (let f = 0; f < 60; f++) g.update(1 / 60);
+    const gap = (t, u) => (Math.hypot(t.pos[0] - u.pos[0], t.pos[1] - u.pos[1])
+                           - (t.pitch_r() + u.pitch_r())) / U;
+    return { toA: +gap(C, A).toFixed(3), toB: +gap(C, B).toFixed(3),
+             tol: +(g.mesh_tol / U).toFixed(3) };
+  });
+  check("two gears on the same hub cannot be dropped inside each other",
+    sib.toB >= -sib.tol - 1e-6, JSON.stringify(sib));
+  check("...and the one that moved still seats against the hub it was aimed at",
+    Math.abs(sib.toA) <= sib.tol + 1e-6, JSON.stringify(sib));
 
   // 8. and Next Level advances
   if (won.next) {

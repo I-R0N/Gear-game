@@ -140,6 +140,37 @@ Every alloy gets a machined treatment derived from the base hex: `×1.34` top-le
 `rgba(0,0,0,.55)` engraved outline. That derivation lives in one place (`shadeHex`), so a
 new part only needs a base hex to inherit the material.
 
+### Planes, and what may overlap what
+
+The board is not flat, and the placement rule is the only thing that says so.
+
+**Gears that mesh are at the same height** — that is what meshing *means*. So a plane
+spreads along mesh edges, and it spreads transitively: everything reachable through mesh
+edges alone is one layer of the machine. A **shaft** is the only thing that changes
+height, so a shaft hop breaks the chain instead of continuing it. A gear in no train at
+all is on the bench, and the bench is a plane too, which is what stops a dropped spare
+burying itself in another spare.
+
+From which: **coplanar gears must either mesh or stay clear of each other.** Anything a
+shaft has lifted out of the plane may pass over anything below it.
+
+Both halves earn their keep. The strict half fixes a real defect — two gears meshing the
+same hub are siblings on one plane and could previously be dropped 1.9 pitch radii inside
+each other, which is a picture that lies about the machine. The permissive half is what
+lets the campaign exist at all: a compound reduction *always* overlaps in plan view
+(`CLOCK.md`, rule 2), and sixteen of the twenty levels contain at least one overlapping
+pair. Every one of those pairs is reachable only through a shaft. `npm test` asserts that
+level by level, in both directions.
+
+The check runs against a candidate *position*, not against the dragged tile, because the
+tile is out of the mesh graph while it is in hand: whatever it would be tangent to at that
+position is what it would be coplanar with if released there. That also makes the rule
+independent of the order parts are placed in — which matters, because a level's compound
+wheel is seated before the pinion that will lift it out of the plane exists.
+
+**Not yet built:** the planes are enforced but not *drawn*. A shaft-borne gear passing over
+another still reads as clipping rather than as depth. See the parking lot in `LEVELS.md`.
+
 ### Type
 
 Families (subset WOFF2, embedded as data URIs — the file stays self-contained):

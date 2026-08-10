@@ -94,6 +94,51 @@ window.__L = {
     return this.report(idx);
   },
 
+  // Gears that mesh are at the same height — that is what meshing means — so the
+  // plane spreads along mesh edges and stops at a shaft, which is the only thing that
+  // changes height. Two gears on ONE plane must therefore either mesh or stay clear;
+  // if they overlap, the picture is lying about the machine.
+  //
+  // The campaign leans on the other half of that rule constantly: a compound
+  // reduction always overlaps in plan view (CLOCK.md, rule 2), and sixteen of the
+  // twenty levels contain at least one overlapping pair. Every one of those pairs is
+  // reachable only through a shaft. This proves the distinction holds level by level,
+  // which is what lets the placement rule be strict without breaking the clock.
+  coplanarOverlaps(idx) {
+    const g = this.g();
+    this.solve(idx, { frames: 30 });
+    const U = g.Rp2;
+    const adj = new Map();
+    const add = (a, b) => { if (!adj.has(a)) adj.set(a, []); adj.get(a).push(b); };
+    for (const e of g.mesh_edges) { add(e[0], e[1]); add(e[1], e[0]); }
+    const meshed = (x, y) => g.mesh_edges.some(e => (e[0] === x && e[1] === y) || (e[0] === y && e[1] === x));
+    const coplanar = (x, y) => {
+      const seen = new Set([x]), q = [x];
+      while (q.length) {
+        const c = q.pop();
+        for (const n of (adj.get(c) || [])) {
+          if (n === y) return true;
+          if (!seen.has(n)) { seen.add(n); q.push(n); }
+        }
+      }
+      return !adj.has(x) && !adj.has(y);       // two idle parts share the bench
+    };
+    const gears = g.tile_list.filter(t => !t.is_rack() && !t.is_ring());
+    const bad = [], viaShaft = [];
+    for (let a = 0; a < gears.length; a++) {
+      for (let b = a + 1; b < gears.length; b++) {
+        const A = gears[a], B = gears[b];
+        if (A.partner === B || meshed(A, B)) continue;
+        const d = Math.hypot(A.pos[0]-B.pos[0], A.pos[1]-B.pos[1]);
+        const gap = (d - (A.pitch_r() + B.pitch_r())) / U;
+        if (gap >= -g.mesh_tol / U) continue;                 // not overlapping
+        const rec = A.label + "/" + B.label + " " + gap.toFixed(2);
+        if (coplanar(A, B)) bad.push(rec); else viaShaft.push(rec);
+      }
+    }
+    return { bad, viaShaft };
+  },
+
   // Degenerate placement 3, and the one a player actually found: WIN OFF A COAST.
   //
   // A gear cut loose from its motor does not stop, it spins down over about a second.
